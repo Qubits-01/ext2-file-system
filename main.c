@@ -126,6 +126,32 @@ int main(int argc, char *argv[])
     fread(&fileSizeLower, sizeof(fileSizeLower), 1, ext2FS);
     printf("fileSizeLower: %d\n", fileSizeLower);
 
+    // Get the 12 direct block pointers.
+    uint32_t directBlockPtrs[12];
+    do_fseek(ext2FS, inodeAddr + 40, SEEK_SET);
+    for (int i = 0; i < 12; i++)
+    {
+        fread(&directBlockPtrs[i], sizeof(directBlockPtrs[i]), 1, ext2FS);
+        printf("directBlockPtrs[%d]: %d\n", i, directBlockPtrs[i]);
+    }
+
+    // Get the singly indirect block pointer.
+    uint32_t singlyIndirectBlockPtr;
+    do_fseek(ext2FS, inodeAddr + 88, SEEK_SET);
+    fread(&singlyIndirectBlockPtr, sizeof(singlyIndirectBlockPtr), 1, ext2FS);
+    printf("singlyIndirectBlockPtr: %d\n", singlyIndirectBlockPtr);
+
+    // Get the doubly indirect block pointer.
+    uint32_t doublyIndirectBlockPtr;
+    do_fseek(ext2FS, inodeAddr + 92, SEEK_SET);
+    fread(&doublyIndirectBlockPtr, sizeof(doublyIndirectBlockPtr), 1, ext2FS);
+    printf("doublyIndirectBlockPtr: %d\n", doublyIndirectBlockPtr);
+
+    // Get the triply indirect block pointer.
+    uint32_t triplyIndirectBlockPtr;
+    do_fseek(ext2FS, inodeAddr + 96, SEEK_SET);
+    fread(&triplyIndirectBlockPtr, sizeof(triplyIndirectBlockPtr), 1, ext2FS);
+
     // Close the ext2 file system.
     do_fclose(ext2FS);
 
