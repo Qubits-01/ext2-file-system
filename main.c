@@ -2,10 +2,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#define SB_ADDR 1024
+#define BGD_SIZE 32
 #define ROOT_INODE_NUM 2
-#define ADDR_SB 1024
 
-int do_seek(FILE *fp, int offset, int whence);
+int do_fseek(FILE *fp, int offset, int whence);
+int do_fclose(FILE *fp);
 
 // superblock struct.
 struct SB
@@ -16,6 +18,9 @@ struct SB
     uint32_t blocksPerBG;
     uint32_t inodesPerBG;
     uint16_t inodeSize;
+
+    // Other derived values that is relevant to the program.
+    uint32_t blockSize;
 };
 
 int main(int argc, char *argv[])
@@ -50,26 +55,31 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
+    // PARSE THE SUPERBLOCK ----------------------------------------------------
     // Read the superblock.
     struct SB sb;
 
-    do_seek(ext2FS, ADDR_SB, SEEK_SET);
+    do_fseek(ext2FS, SB_ADDR, SEEK_SET);
     fread(&sb.totalInodes, sizeof(sb.totalInodes), 1, ext2FS);
 
-    do_seek(ext2FS, ADDR_SB + 4, SEEK_SET);
+    do_fseek(ext2FS, SB_ADDR + 4, SEEK_SET);
     fread(&sb.totalBlocks, sizeof(sb.totalBlocks), 1, ext2FS);
 
-    do_seek(ext2FS, ADDR_SB + 24, SEEK_SET);
+    do_fseek(ext2FS, SB_ADDR + 24, SEEK_SET);
     fread(&sb.blockSizeMult, sizeof(sb.blockSizeMult), 1, ext2FS);
 
-    do_seek(ext2FS, ADDR_SB + 32, SEEK_SET);
+    do_fseek(ext2FS, SB_ADDR + 32, SEEK_SET);
     fread(&sb.blocksPerBG, sizeof(sb.blocksPerBG), 1, ext2FS);
 
-    do_seek(ext2FS, ADDR_SB + 40, SEEK_SET);
+    do_fseek(ext2FS, SB_ADDR + 40, SEEK_SET);
     fread(&sb.inodesPerBG, sizeof(sb.inodesPerBG), 1, ext2FS);
 
-    do_seek(ext2FS, ADDR_SB + 88, SEEK_SET);
+    do_fseek(ext2FS, SB_ADDR + 88, SEEK_SET);
     fread(&sb.inodeSize, sizeof(sb.inodeSize), 1, ext2FS);
+
+    // Calculate the block size.
+    sb.blockSize = 1024 << sb.blockSizeMult;
+    // -------------------------------------------------------------------------
 
     // Print the superblock info.
     printf("totalInodes: %d\n", sb.totalInodes);
@@ -78,23 +88,85 @@ int main(int argc, char *argv[])
     printf("blocksPerBG: %d\n", sb.blocksPerBG);
     printf("inodesPerBG: %d\n", sb.inodesPerBG);
     printf("inodeSize: %d\n", sb.inodeSize);
+    printf("blockSize: %d\n", sb.blockSize);
+
+    // Determine which block group the corresponding inode is in.
+    int inodeBGNum = (ROOT_INODE_NUM - 1) / sb.inodesPerBG;
+    printf("inodeBGNum: %d\n", inodeBGNum);
+
+    // Determine the index of the inode in the inode table.
+    int inodeIndex = (ROOT_INODE_NUM - 1) % sb.inodesPerBG;
+    printf("inodeIndex: %d\n", inodeIndex);
+
+    // Get the block group descriptor table entry address.
+    int bgdtEntryAddr = sb.blockSize + (inodeBGNum * BGD_SIZE);
+    printf("bgdtEntryAddr: %d\n", bgdtEntryAddr);
+
+    // Get the inode table address.
+    uint32_t relInodeTableAddr;
+    do_fseek(ext2FS, bgdtEntryAddr + 8, SEEK_SET);
+    fread(&relInodeTableAddr, sizeof(relInodeTableAddr), 1, ext2FS);
+    int inodeTableAddr = relInodeTableAddr * sb.blockSize;
+    printf("RelInodeTableAddr (2): %d\n", relInodeTableAddr);
+    printf("inodeTableAddr (2): %d\n", inodeTableAddr);
+
+    // Get the inode address.
+    uint32_t inodeAddr = inodeTableAddr + (inodeIndex * sb.inodeSize);
+
+    // Parse the inode.
+    // Get the type.
+    uint16_t type;
+    do_fseek(ext2FS, inodeAddr, SEEK_SET);
+    fread(&type, sizeof(type), 1, ext2FS);
+    printf("type: %04x\n", type);
+
+    // Get lower 32 bits of the file size.
+    uint32_t fileSizeLower;
+    do_fseek(ext2FS, inodeAddr + 4, SEEK_SET);
+    fread(&fileSizeLower, sizeof(fileSizeLower), 1, ext2FS);
+    printf("fileSizeLower: %d\n", fileSizeLower);
 
     // Close the ext2 file system.
-    if (fclose(ext2FS) != 0)
+    do_fclose(ext2FS);
+
+    return 0;
+}
+
+// Utility methods.
+// int getBGNum(int inodeNum, int inodesPerBG)
+// {
+//     return (inodeNum - 1) / inodesPerBG;
+// }
+
+// int getInodeIndex(int inodeNum, int inodesPerBG)
+// {
+//     return (inodeNum - 1) % inodesPerBG;
+// }
+
+// int getInodeTableAddr(int inodeBGNum)
+// {
+//     // Get the corresponding block group descriptor table entry address.
+//     int bgdtEntryAddr = BGDT_ADDR + (inodeBGNum * BGD_SIZE);
+
+//     return 0;
+// }
+
+int do_fseek(FILE *fp, int offset, int whence)
+{
+    if (fseek(fp, offset, whence) != 0)
     {
-        perror("fclose failed");
+        perror("fseek failed");
         exit(1);
     }
 
     return 0;
 }
 
-// Utility methods.
-int do_seek(FILE *fp, int offset, int whence)
+int do_fclose(FILE *fp)
 {
-    if (fseek(fp, offset, whence) != 0)
+    if (fclose(fp) != 0)
     {
-        perror("fseek failed");
+        perror("fclose failed");
         exit(1);
     }
 
