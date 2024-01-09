@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <fcntl.h>
 
 #define ROOT_INODE_NUM 2
 #define ADDR_SB 1024
@@ -81,7 +80,11 @@ int main(int argc, char *argv[])
     printf("inodeSize: %d\n", sb.inodeSize);
 
     // Close the ext2 file system.
-    fclose(ext2FS);
+    if (fclose(ext2FS) != 0)
+    {
+        perror("fclose failed");
+        exit(1);
+    }
 
     return 0;
 }
