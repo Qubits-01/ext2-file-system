@@ -23,6 +23,17 @@ struct SB
     uint32_t blockSize;
 };
 
+struct Inode
+{
+    uint16_t type;
+    uint32_t fileSizeLower;
+    uint32_t fileSizeUpper;
+    uint32_t directBlockPtrs[12];
+    uint32_t singlyIBlockPtr;
+    uint32_t doublyIBlockPtr;
+    uint32_t triplyIBlockPtr;
+};
+
 int main(int argc, char *argv[])
 {
     // GET CMD LINE ARGUMENTS --------------------------------------------------
@@ -136,21 +147,22 @@ int main(int argc, char *argv[])
     }
 
     // Get the singly indirect block pointer.
-    uint32_t singlyIndirectBlockPtr;
+    uint32_t singlyIBlockPtr;
     do_fseek(ext2FS, inodeAddr + 88, SEEK_SET);
-    fread(&singlyIndirectBlockPtr, sizeof(singlyIndirectBlockPtr), 1, ext2FS);
-    printf("singlyIndirectBlockPtr: %d\n", singlyIndirectBlockPtr);
+    fread(&singlyIBlockPtr, sizeof(singlyIBlockPtr), 1, ext2FS);
+    printf("singlyIBlockPtr: %d\n", singlyIBlockPtr);
 
     // Get the doubly indirect block pointer.
-    uint32_t doublyIndirectBlockPtr;
+    uint32_t doublyIBlockPtr;
     do_fseek(ext2FS, inodeAddr + 92, SEEK_SET);
-    fread(&doublyIndirectBlockPtr, sizeof(doublyIndirectBlockPtr), 1, ext2FS);
-    printf("doublyIndirectBlockPtr: %d\n", doublyIndirectBlockPtr);
+    fread(&doublyIBlockPtr, sizeof(doublyIBlockPtr), 1, ext2FS);
+    printf("doublyIBlockPtr: %d\n", doublyIBlockPtr);
 
     // Get the triply indirect block pointer.
-    uint32_t triplyIndirectBlockPtr;
+    uint32_t triplyIBlockPtr;
     do_fseek(ext2FS, inodeAddr + 96, SEEK_SET);
-    fread(&triplyIndirectBlockPtr, sizeof(triplyIndirectBlockPtr), 1, ext2FS);
+    fread(&triplyIBlockPtr, sizeof(triplyIBlockPtr), 1, ext2FS);
+    printf("triplyIBlockPtr: %d\n", triplyIBlockPtr);
 
     // Close the ext2 file system.
     do_fclose(ext2FS);
