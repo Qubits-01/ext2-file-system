@@ -35,7 +35,8 @@ struct DirEntry
     uint32_t inodeNum;
     uint16_t entrySize;
     uint8_t nameLen;
-    unsigned char name[255]; // Assumption: max file name length is 255 chars.
+    // Assumption: max file name length is 255 chars (inclusive of '/0').
+    unsigned char name[255];
 };
 
 struct Node
@@ -204,13 +205,13 @@ int main(int argc, char *argv[])
         do_fseek(ext2FS, DBlockAddr, SEEK_SET);
         fread(&data[i * sb.blockSize], sb.blockSize, 1, ext2FS);
 
-        // Print the data (per block).
-        printf("Direct Block %d:\n", i);
-        // Print per byte.
-        for (int j = 0; j < sb.blockSize; j++)
-        {
-            printf("%02x ", data[i * sb.blockSize + j]);
-        }
+        // // Print the data (per block).
+        // printf("Direct Block %d:\n", i);
+        // // Print per byte.
+        // for (int j = 0; j < sb.blockSize; j++)
+        // {
+        //     printf("%02x ", data[i * sb.blockSize + j]);
+        // }
     }
     printf("\n");
 
@@ -248,6 +249,8 @@ int main(int argc, char *argv[])
         {
             dirEntry->name[j] = data[i + j];
         }
+        // Add the null terminator.
+        dirEntry->name[dirEntry->nameLen] = '\0';
 
         // Push the directory entry into the linked list.
         push(&dirEntriesList, dirEntry);
