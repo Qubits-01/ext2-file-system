@@ -151,10 +151,9 @@ int main(int argc, char *argv[])
     printf("type: %d\n", inode2.type);
 
     // Get lower 32 bits of the file size.
-    uint32_t fileSizeLower;
     do_fseek(ext2FS, inodeAddr + 4, SEEK_SET);
     fread(&inode2.FSizeLower, sizeof(inode2.FSizeLower), 1, ext2FS);
-    printf("fileSizeLower: %d\n", inode2.FSizeLower);
+    printf("FSizeLower: %d\n", inode2.FSizeLower);
 
     // Get the 12 direct block pointers.
     do_fseek(ext2FS, inodeAddr + 40, SEEK_SET);
@@ -185,7 +184,7 @@ int main(int argc, char *argv[])
     // Read the corresponding data block/s.
     // Read the direct blocks.
     // Dynamically allocate memory (using the fileSizeLower).
-    unsigned char *data = (unsigned char *)malloc(fileSizeLower * sizeof(unsigned char));
+    unsigned char *data = (unsigned char *)malloc(inode2.FSizeLower * sizeof(unsigned char));
     for (int i = 0; i < 12; i++)
     {
         if (inode2.DBlockPtrs[i] == 0)
@@ -194,15 +193,15 @@ int main(int argc, char *argv[])
         }
 
         // Get the direct block pointer.
-        uint32_t directBlockPtr = inode2.DBlockPtrs[i];
-        printf("directBlockPtr: %d\n", directBlockPtr);
+        uint32_t DBlockPtr = inode2.DBlockPtrs[i];
+        printf("directBlockPtr: %d\n", DBlockPtr);
 
         // Get the direct block address.
-        uint32_t directBlockAddr = directBlockPtr * sb.blockSize;
-        printf("directBlockAddr: %d\n", directBlockAddr);
+        uint32_t DBlockAddr = DBlockPtr * sb.blockSize;
+        printf("directBlockAddr: %d\n", DBlockAddr);
 
-        // Read the direct block.
-        do_fseek(ext2FS, directBlockAddr, SEEK_SET);
+        // Read the entire direct block.
+        do_fseek(ext2FS, DBlockAddr, SEEK_SET);
         fread(&data[i * sb.blockSize], sb.blockSize, 1, ext2FS);
 
         // Print the data (per block).
@@ -219,15 +218,64 @@ int main(int argc, char *argv[])
     // TODO: Read the doubly indirect block.
     // TODO: Read the triply indirect block.
 
-    struct Node *head = NULL;
+    // TODO: Generalize the directory entry access and parsing.
+
+    struct Node *dirEntriesList = NULL;
+    struct DirEntry *dirEntry;
 
     // Parse (if dir content/s).
+    // Traverse every byte of data.
+    uint32_t i = 0;
+    while (i < inode2.FSizeLower)
+    {
+        struct DirEntry *dirEntry = (struct DirEntry *)malloc(sizeof(struct DirEntry));
+
+        // Get the inode number (byte 0 to byte 3 - in little endian).
+        dirEntry->inodeNum = data[i] | data[i + 1] << 8 | data[i + 2] << 16 | data[i + 3] << 24;
+        i += 4;
+
+        // Get the entry size (byte 4 to byte 5 - in little endian).
+        dirEntry->entrySize = data[i] | data[i + 1] << 8;
+        i += 2;
+
+        // Get the name length (byte 6).
+        dirEntry->nameLen = data[i];
+        i += 1;
+        i += 1; // Skip the file type byte.
+
+        // Get the name (byte 8 to byte 8 + nameLen - 1).
+        for (int j = 0; j < dirEntry->nameLen; j++)
+        {
+            dirEntry->name[j] = data[i + j];
+        }
+
+        // Push the directory entry into the linked list.
+        push(&dirEntriesList, dirEntry);
+
+        // Update i for the next directory entry.
+        i += dirEntry->entrySize - 8;
+    }
+
+    // Print the directory entries.
+    struct Node *temp = dirEntriesList;
+
+    while (temp != NULL)
+    {
+        struct DirEntry *dirEntry = (struct DirEntry *)temp->data;
+
+        printf("inodeNum: %d\n", dirEntry->inodeNum);
+        printf("entrySize: %d\n", dirEntry->entrySize);
+        printf("nameLen: %d\n", dirEntry->nameLen);
+        printf("name: %s\n\n", dirEntry->name);
+
+        temp = temp->next;
+    }
 
     // TODO: Parse (if file content/s).
 
     // Free the dynamically allocated memory.
-    free(data);
-    freeList(head);
+    free(data);               // Free the data gathered from the data blocks.
+    freeList(dirEntriesList); // Free the linked list of directory entries.
 
     // Close the ext2 file system.
     do_fclose(ext2FS);
