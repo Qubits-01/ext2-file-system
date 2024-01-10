@@ -19,7 +19,7 @@ struct SB
 
     // Other derived values that is relevant to the program.
     uint32_t blockSize;
-};
+} sb;
 
 struct Inode
 {
@@ -48,10 +48,12 @@ struct Node
 };
 
 // Function prototypes.
-int parseSuperblock(FILE *ext2FS, struct SB *sb);
+int parseSuperblock(FILE *ext2FS);
+struct Inode *parseInode(uint32_t inodeNum, FILE *ext2FS);
 struct Node *createNode(void *data);
 void append(struct Node **head, void *newData);
 void freeList(struct Node *head);
+void *do_malloc(size_t size);
 int do_fseek(FILE *fp, int offset, int whence);
 int do_fread(void *buffer, size_t size, size_t count, FILE *file);
 int do_fclose(FILE *fp);
@@ -89,8 +91,7 @@ int main(int argc, char *argv[])
     }
 
     // Read and parse the superblock.
-    struct SB sb;
-    parseSuperblock(ext2FS, &sb);
+    parseSuperblock(ext2FS);
 
     // Print the superblock info.
     printf("totalInodes: %d\n", sb.totalInodes);
@@ -103,82 +104,22 @@ int main(int argc, char *argv[])
 
     // TODO: Generalize the inode access and parsing.
 
-    // Determine which block group the corresponding inode is in.
-    int inodeBGNum = (ROOT_INODE_NUM - 1) / sb.inodesPerBG;
-    printf("inodeBGNum: %d\n", inodeBGNum);
-
-    // Determine the index of the inode in the inode table.
-    int inodeIndex = (ROOT_INODE_NUM - 1) % sb.inodesPerBG;
-    printf("inodeIndex: %d\n", inodeIndex);
-
-    // Get the block group descriptor table entry address.
-    int bgdtEntryAddr = sb.blockSize + (inodeBGNum * BGD_SIZE);
-    printf("bgdtEntryAddr: %d\n", bgdtEntryAddr);
-
-    // Get the inode table address.
-    uint32_t relInodeTableAddr;
-    do_fseek(ext2FS, bgdtEntryAddr + 8, SEEK_SET);
-    do_fread(&relInodeTableAddr, sizeof(relInodeTableAddr), 1, ext2FS);
-    int inodeTableAddr = relInodeTableAddr * sb.blockSize;
-    printf("RelInodeTableAddr (2): %d\n", relInodeTableAddr);
-    printf("inodeTableAddr (2): %d\n", inodeTableAddr);
-
-    // Get the inode address.
-    uint32_t inodeAddr = inodeTableAddr + (inodeIndex * sb.inodeSize);
-
-    // Parse the inode.
-    struct Inode inode2;
-
-    // Get the type.
-    uint16_t type;
-    do_fseek(ext2FS, inodeAddr, SEEK_SET);
-    do_fread(&inode2.type, sizeof(inode2.type), 1, ext2FS);
-    printf("type: %d\n", inode2.type);
-
-    // Get lower 32 bits of the file size.
-    do_fseek(ext2FS, inodeAddr + 4, SEEK_SET);
-    do_fread(&inode2.FSizeLower, sizeof(inode2.FSizeLower), 1, ext2FS);
-    printf("FSizeLower: %d\n", inode2.FSizeLower);
-
-    // Get the 12 direct block pointers.
-    do_fseek(ext2FS, inodeAddr + 40, SEEK_SET);
-    for (int i = 0; i < 12; i++)
-    {
-        do_fread(&inode2.DBlockPtrs[i], sizeof(inode2.DBlockPtrs[i]), 1, ext2FS);
-        printf("directBlockPtrs[%d]: %d\n", i, inode2.DBlockPtrs[i]);
-    }
-
-    // Get the singly indirect block pointer.
-    uint32_t singlyIBlockPtr;
-    do_fseek(ext2FS, inodeAddr + 88, SEEK_SET);
-    do_fread(&inode2.SIBlockPtr, sizeof(inode2.SIBlockPtr), 1, ext2FS);
-    printf("singlyIBlockPtr: %d\n", inode2.SIBlockPtr);
-
-    // Get the doubly indirect block pointer.
-    uint32_t doublyIBlockPtr;
-    do_fseek(ext2FS, inodeAddr + 92, SEEK_SET);
-    do_fread(&inode2.DIBlockPtr, sizeof(inode2.DIBlockPtr), 1, ext2FS);
-    printf("doublyIBlockPtr: %d\n", inode2.DIBlockPtr);
-
-    // Get the triply indirect block pointer.
-    uint32_t triplyIBlockPtr;
-    do_fseek(ext2FS, inodeAddr + 96, SEEK_SET);
-    do_fread(&inode2.TIBlockPtr, sizeof(inode2.TIBlockPtr), 1, ext2FS);
-    printf("triplyIBlockPtr: %d\n", inode2.TIBlockPtr);
+    // Read and parse the root inode.
+    struct Inode *inode = parseInode(ROOT_INODE_NUM, ext2FS);
 
     // Read the corresponding data block/s.
     // Read the direct blocks.
     // Dynamically allocate memory (using the fileSizeLower).
-    unsigned char *data = (unsigned char *)malloc(inode2.FSizeLower * sizeof(unsigned char));
+    unsigned char *data = (unsigned char *)malloc(inode->FSizeLower * sizeof(unsigned char));
     for (int i = 0; i < 12; i++)
     {
-        if (inode2.DBlockPtrs[i] == 0)
+        if (inode->DBlockPtrs[i] == 0)
         {
             break;
         }
 
         // Get the direct block pointer.
-        uint32_t DBlockPtr = inode2.DBlockPtrs[i];
+        uint32_t DBlockPtr = inode->DBlockPtrs[i];
         printf("directBlockPtr: %d\n", DBlockPtr);
 
         // Get the direct block address.
@@ -202,7 +143,7 @@ int main(int argc, char *argv[])
     // Parse (if dir content/s).
     // Traverse every byte of data.
     uint32_t i = 0;
-    while (i < inode2.FSizeLower)
+    while (i < inode->FSizeLower)
     {
         struct DirEntry *dirEntry = (struct DirEntry *)malloc(sizeof(struct DirEntry));
 
@@ -251,6 +192,7 @@ int main(int argc, char *argv[])
     // TODO: Parse (if file content/s).
 
     // Free the dynamically allocated memory.
+    free(inode);              // Free the root inode struct.
     free(data);               // Free the data gathered from the data blocks.
     freeList(dirEntriesList); // Free the linked list of directory entries.
 
@@ -261,42 +203,93 @@ int main(int argc, char *argv[])
 }
 
 // Utility methods.
-int parseSuperblock(FILE *ext2FS, struct SB *sb)
+int parseSuperblock(FILE *ext2FS)
 {
     do_fseek(ext2FS, SB_ADDR, SEEK_SET);
-    do_fread(&sb->totalInodes, sizeof(sb->totalInodes), 1, ext2FS);
+    do_fread(&sb.totalInodes, sizeof(sb.totalInodes), 1, ext2FS);
 
     do_fseek(ext2FS, SB_ADDR + 4, SEEK_SET);
-    do_fread(&sb->totalBlocks, sizeof(sb->totalBlocks), 1, ext2FS);
+    do_fread(&sb.totalBlocks, sizeof(sb.totalBlocks), 1, ext2FS);
 
     do_fseek(ext2FS, SB_ADDR + 24, SEEK_SET);
-    do_fread(&sb->blockSizeMult, sizeof(sb->blockSizeMult), 1, ext2FS);
+    do_fread(&sb.blockSizeMult, sizeof(sb.blockSizeMult), 1, ext2FS);
 
     do_fseek(ext2FS, SB_ADDR + 32, SEEK_SET);
-    do_fread(&sb->blocksPerBG, sizeof(sb->blocksPerBG), 1, ext2FS);
+    do_fread(&sb.blocksPerBG, sizeof(sb.blocksPerBG), 1, ext2FS);
 
     do_fseek(ext2FS, SB_ADDR + 40, SEEK_SET);
-    do_fread(&sb->inodesPerBG, sizeof(sb->inodesPerBG), 1, ext2FS);
+    do_fread(&sb.inodesPerBG, sizeof(sb.inodesPerBG), 1, ext2FS);
 
     do_fseek(ext2FS, SB_ADDR + 88, SEEK_SET);
-    do_fread(&sb->inodeSize, sizeof(sb->inodeSize), 1, ext2FS);
+    do_fread(&sb.inodeSize, sizeof(sb.inodeSize), 1, ext2FS);
 
     // Calculate the block size.
-    sb->blockSize = 1024 << sb->blockSizeMult;
+    sb.blockSize = 1024 << sb.blockSizeMult;
 
     return 0;
+}
+
+struct Inode *parseInode(uint32_t inodeNum, FILE *ext2FS)
+{
+    // COMPUTE FOR THE INODE ADDRESS (BYTE OFFSET) ------------------------------
+    // Determine which block group the corresponding inode is in.
+    uint32_t inodeBGNum = (inodeNum - 1) / sb.inodesPerBG;
+
+    // Determine the index of the inode in the inode table.
+    uint32_t inodeIndex = (inodeNum - 1) % sb.inodesPerBG;
+
+    // Get the block group descriptor table entry address.
+    uint32_t bgdtEntryAddr = sb.blockSize + (inodeBGNum * BGD_SIZE);
+
+    // Get the inode table address.
+    uint32_t relInodeTableAddr;
+    do_fseek(ext2FS, bgdtEntryAddr + 8, SEEK_SET);
+    do_fread(&relInodeTableAddr, sizeof(relInodeTableAddr), 1, ext2FS);
+    uint32_t inodeTableAddr = relInodeTableAddr * sb.blockSize;
+
+    // Get the inode address.
+    uint32_t inodeAddr = inodeTableAddr + (inodeIndex * sb.inodeSize);
+    // -------------------------------------------------------------------------
+
+    // PARSE THE INODE AND BUILD THE ITS INODE STRUCT --------------------------
+    // Allocate memory for the inode struct.
+    struct Inode *inode = (struct Inode *)do_malloc(sizeof(struct Inode));
+
+    // Get the type.
+    do_fseek(ext2FS, inodeAddr, SEEK_SET);
+    do_fread(&inode->type, sizeof(inode->type), 1, ext2FS);
+
+    // Get lower 32 bits of the file size.
+    do_fseek(ext2FS, inodeAddr + 4, SEEK_SET);
+    do_fread(&inode->FSizeLower, sizeof(inode->FSizeLower), 1, ext2FS);
+
+    // Get the 12 direct block pointers.
+    do_fseek(ext2FS, inodeAddr + 40, SEEK_SET);
+    for (int i = 0; i < 12; i++)
+    {
+        do_fread(&inode->DBlockPtrs[i], sizeof(inode->DBlockPtrs[i]), 1, ext2FS);
+    }
+
+    // Get the singly indirect block pointer.
+    do_fseek(ext2FS, inodeAddr + 88, SEEK_SET);
+    do_fread(&inode->SIBlockPtr, sizeof(inode->SIBlockPtr), 1, ext2FS);
+
+    // Get the doubly indirect block pointer.
+    do_fseek(ext2FS, inodeAddr + 92, SEEK_SET);
+    do_fread(&inode->DIBlockPtr, sizeof(inode->DIBlockPtr), 1, ext2FS);
+
+    // Get the triply indirect block pointer.
+    do_fseek(ext2FS, inodeAddr + 96, SEEK_SET);
+    do_fread(&inode->TIBlockPtr, sizeof(inode->TIBlockPtr), 1, ext2FS);
+    // -------------------------------------------------------------------------
+
+    return inode;
 }
 
 // Circular doubly linked list.
 struct Node *createNode(void *data)
 {
-    struct Node *newNode = (struct Node *)malloc(sizeof(struct Node));
-    if (newNode == NULL)
-    {
-        perror("malloc failed");
-        exit(1);
-    }
-
+    struct Node *newNode = (struct Node *)do_malloc(sizeof(struct Node));
     newNode->data = data;
     newNode->next = NULL;
     newNode->prev = NULL;
@@ -343,6 +336,18 @@ void freeList(struct Node *head)
         free(current);
         current = next;
     } while (current != head);
+}
+
+void *do_malloc(size_t size)
+{
+    void *ptr = malloc(size);
+    if (ptr == NULL)
+    {
+        perror("malloc failed");
+        exit(1);
+    }
+
+    return ptr;
 }
 
 int do_fseek(FILE *fp, int offset, int whence)
