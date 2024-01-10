@@ -26,12 +26,11 @@ struct SB
 struct Inode
 {
     uint16_t type;
-    uint32_t fileSizeLower;
-    uint32_t fileSizeUpper;
-    uint32_t directBlockPtrs[12];
-    uint32_t singlyIBlockPtr;
-    uint32_t doublyIBlockPtr;
-    uint32_t triplyIBlockPtr;
+    uint32_t FSizeLower;     // Lower 32 bits of the file size.
+    uint32_t DBlockPtrs[12]; // Direct block pointers.
+    uint32_t SIBlockPtr;     // Singly indirect block pointer.
+    uint32_t DIBlockPtr;     // Doubly indirect block pointer.
+    uint32_t TIBlockPtr;     // Triply indirect block pointer.
 };
 
 int main(int argc, char *argv[])
@@ -125,44 +124,88 @@ int main(int argc, char *argv[])
     uint32_t inodeAddr = inodeTableAddr + (inodeIndex * sb.inodeSize);
 
     // Parse the inode.
+    struct Inode inode2;
+
     // Get the type.
     uint16_t type;
     do_fseek(ext2FS, inodeAddr, SEEK_SET);
-    fread(&type, sizeof(type), 1, ext2FS);
-    printf("type: %04x\n", type);
+    fread(&inode2.type, sizeof(inode2.type), 1, ext2FS);
+    printf("type: %d\n", inode2.type);
 
     // Get lower 32 bits of the file size.
     uint32_t fileSizeLower;
     do_fseek(ext2FS, inodeAddr + 4, SEEK_SET);
-    fread(&fileSizeLower, sizeof(fileSizeLower), 1, ext2FS);
-    printf("fileSizeLower: %d\n", fileSizeLower);
+    fread(&inode2.FSizeLower, sizeof(inode2.FSizeLower), 1, ext2FS);
+    printf("fileSizeLower: %d\n", inode2.FSizeLower);
 
     // Get the 12 direct block pointers.
-    uint32_t directBlockPtrs[12];
     do_fseek(ext2FS, inodeAddr + 40, SEEK_SET);
     for (int i = 0; i < 12; i++)
     {
-        fread(&directBlockPtrs[i], sizeof(directBlockPtrs[i]), 1, ext2FS);
-        printf("directBlockPtrs[%d]: %d\n", i, directBlockPtrs[i]);
+        fread(&inode2.DBlockPtrs[i], sizeof(inode2.DBlockPtrs[i]), 1, ext2FS);
+        printf("directBlockPtrs[%d]: %d\n", i, inode2.DBlockPtrs[i]);
     }
 
     // Get the singly indirect block pointer.
     uint32_t singlyIBlockPtr;
     do_fseek(ext2FS, inodeAddr + 88, SEEK_SET);
-    fread(&singlyIBlockPtr, sizeof(singlyIBlockPtr), 1, ext2FS);
-    printf("singlyIBlockPtr: %d\n", singlyIBlockPtr);
+    fread(&inode2.SIBlockPtr, sizeof(inode2.SIBlockPtr), 1, ext2FS);
+    printf("singlyIBlockPtr: %d\n", inode2.SIBlockPtr);
 
     // Get the doubly indirect block pointer.
     uint32_t doublyIBlockPtr;
     do_fseek(ext2FS, inodeAddr + 92, SEEK_SET);
-    fread(&doublyIBlockPtr, sizeof(doublyIBlockPtr), 1, ext2FS);
-    printf("doublyIBlockPtr: %d\n", doublyIBlockPtr);
+    fread(&inode2.DIBlockPtr, sizeof(inode2.DIBlockPtr), 1, ext2FS);
+    printf("doublyIBlockPtr: %d\n", inode2.DIBlockPtr);
 
     // Get the triply indirect block pointer.
     uint32_t triplyIBlockPtr;
     do_fseek(ext2FS, inodeAddr + 96, SEEK_SET);
-    fread(&triplyIBlockPtr, sizeof(triplyIBlockPtr), 1, ext2FS);
-    printf("triplyIBlockPtr: %d\n", triplyIBlockPtr);
+    fread(&inode2.TIBlockPtr, sizeof(inode2.TIBlockPtr), 1, ext2FS);
+    printf("triplyIBlockPtr: %d\n", inode2.TIBlockPtr);
+
+    // Read the corresponding data block/s.
+    // Read the direct blocks.
+    // Dynamically allocate memory (using the fileSizeLower).
+    unsigned char *data = (unsigned char *)malloc(fileSizeLower * sizeof(unsigned char));
+    for (int i = 0; i < 12; i++)
+    {
+        if (inode2.DBlockPtrs[i] == 0)
+        {
+            break;
+        }
+
+        // Get the direct block pointer.
+        uint32_t directBlockPtr = inode2.DBlockPtrs[i];
+        printf("directBlockPtr: %d\n", directBlockPtr);
+
+        // Get the direct block address.
+        uint32_t directBlockAddr = directBlockPtr * sb.blockSize;
+        printf("directBlockAddr: %d\n", directBlockAddr);
+
+        // Read the direct block.
+        do_fseek(ext2FS, directBlockAddr, SEEK_SET);
+        fread(&data[i * sb.blockSize], sb.blockSize, 1, ext2FS);
+
+        // Print the data (per block).
+        printf("Direct Block %d:\n", i);
+        // Print per byte.
+        for (int j = 0; j < sb.blockSize; j++)
+        {
+            printf("%02x ", data[i * sb.blockSize + j]);
+        }
+    }
+
+    // TODO: Read the singly indirect block.
+    // TODO: Read the doubly indirect block.
+    // TODO: Read the triply indirect block.
+
+    // Parse (if dir content/s).
+
+    // TODO: Parse (if file content/s).
+
+    // Free the dynamically allocated memory.
+    free(data);
 
     // Close the ext2 file system.
     do_fclose(ext2FS);
@@ -171,24 +214,6 @@ int main(int argc, char *argv[])
 }
 
 // Utility methods.
-// int getBGNum(int inodeNum, int inodesPerBG)
-// {
-//     return (inodeNum - 1) / inodesPerBG;
-// }
-
-// int getInodeIndex(int inodeNum, int inodesPerBG)
-// {
-//     return (inodeNum - 1) % inodesPerBG;
-// }
-
-// int getInodeTableAddr(int inodeBGNum)
-// {
-//     // Get the corresponding block group descriptor table entry address.
-//     int bgdtEntryAddr = BGDT_ADDR + (inodeBGNum * BGD_SIZE);
-
-//     return 0;
-// }
-
 int do_fseek(FILE *fp, int offset, int whence)
 {
     if (fseek(fp, offset, whence) != 0)
