@@ -47,6 +47,8 @@ struct Node
     struct Node *prev;
 };
 
+// Function prototypes.
+int parseSuperblock(FILE *ext2FS, struct SB *sb);
 struct Node *createNode(void *data);
 void append(struct Node **head, void *newData);
 void freeList(struct Node *head);
@@ -86,31 +88,9 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    // PARSE THE SUPERBLOCK ----------------------------------------------------
-    // Read the superblock.
+    // Read and parse the superblock.
     struct SB sb;
-
-    do_fseek(ext2FS, SB_ADDR, SEEK_SET);
-    do_fread(&sb.totalInodes, sizeof(sb.totalInodes), 1, ext2FS);
-
-    do_fseek(ext2FS, SB_ADDR + 4, SEEK_SET);
-    do_fread(&sb.totalBlocks, sizeof(sb.totalBlocks), 1, ext2FS);
-
-    do_fseek(ext2FS, SB_ADDR + 24, SEEK_SET);
-    fread(&sb.blockSizeMult, sizeof(sb.blockSizeMult), 1, ext2FS);
-
-    do_fseek(ext2FS, SB_ADDR + 32, SEEK_SET);
-    do_fread(&sb.blocksPerBG, sizeof(sb.blocksPerBG), 1, ext2FS);
-
-    do_fseek(ext2FS, SB_ADDR + 40, SEEK_SET);
-    do_fread(&sb.inodesPerBG, sizeof(sb.inodesPerBG), 1, ext2FS);
-
-    do_fseek(ext2FS, SB_ADDR + 88, SEEK_SET);
-    do_fread(&sb.inodeSize, sizeof(sb.inodeSize), 1, ext2FS);
-
-    // Calculate the block size.
-    sb.blockSize = 1024 << sb.blockSizeMult;
-    // -------------------------------------------------------------------------
+    parseSuperblock(ext2FS, &sb);
 
     // Print the superblock info.
     printf("totalInodes: %d\n", sb.totalInodes);
@@ -281,8 +261,29 @@ int main(int argc, char *argv[])
 }
 
 // Utility methods.
-int parseSuperblock()
+int parseSuperblock(FILE *ext2FS, struct SB *sb)
 {
+    do_fseek(ext2FS, SB_ADDR, SEEK_SET);
+    do_fread(&sb->totalInodes, sizeof(sb->totalInodes), 1, ext2FS);
+
+    do_fseek(ext2FS, SB_ADDR + 4, SEEK_SET);
+    do_fread(&sb->totalBlocks, sizeof(sb->totalBlocks), 1, ext2FS);
+
+    do_fseek(ext2FS, SB_ADDR + 24, SEEK_SET);
+    do_fread(&sb->blockSizeMult, sizeof(sb->blockSizeMult), 1, ext2FS);
+
+    do_fseek(ext2FS, SB_ADDR + 32, SEEK_SET);
+    do_fread(&sb->blocksPerBG, sizeof(sb->blocksPerBG), 1, ext2FS);
+
+    do_fseek(ext2FS, SB_ADDR + 40, SEEK_SET);
+    do_fread(&sb->inodesPerBG, sizeof(sb->inodesPerBG), 1, ext2FS);
+
+    do_fseek(ext2FS, SB_ADDR + 88, SEEK_SET);
+    do_fread(&sb->inodeSize, sizeof(sb->inodeSize), 1, ext2FS);
+
+    // Calculate the block size.
+    sb->blockSize = 1024 << sb->blockSizeMult;
+
     return 0;
 }
 
