@@ -43,9 +43,11 @@ struct Node
 {
     void *data; // Generic pointer (i.e., generics).
     struct Node *next;
+    struct Node *prev;
 };
 
-void push(struct Node **head, void *newData);
+struct Node *createNode(void *data);
+void append(struct Node **head, void *newData);
 void freeList(struct Node *head);
 int do_fseek(FILE *fp, int offset, int whence);
 int do_fclose(FILE *fp);
@@ -252,8 +254,8 @@ int main(int argc, char *argv[])
         // Add the null terminator.
         dirEntry->name[dirEntry->nameLen] = '\0';
 
-        // Push the directory entry into the linked list.
-        push(&dirEntriesList, dirEntry);
+        // Append the directory entry into the linked list.
+        append(&dirEntriesList, dirEntry);
 
         // Update i for the next directory entry.
         i += dirEntry->entrySize - 8;
@@ -261,8 +263,7 @@ int main(int argc, char *argv[])
 
     // Print the directory entries.
     struct Node *temp = dirEntriesList;
-
-    while (temp != NULL)
+    do
     {
         struct DirEntry *dirEntry = (struct DirEntry *)temp->data;
 
@@ -272,7 +273,7 @@ int main(int argc, char *argv[])
         printf("name: %s\n\n", dirEntry->name);
 
         temp = temp->next;
-    }
+    } while (temp != dirEntriesList);
 
     // TODO: Parse (if file content/s).
 
@@ -287,11 +288,9 @@ int main(int argc, char *argv[])
 }
 
 // Utility methods.
-// Singly-linked list.
-// Function to push data of any type into the linked list.
-void push(struct Node **head, void *data)
+// Circular doubly linked list.
+struct Node *createNode(void *data)
 {
-    // Allocate memory for new node.
     struct Node *newNode = (struct Node *)malloc(sizeof(struct Node));
     if (newNode == NULL)
     {
@@ -299,31 +298,52 @@ void push(struct Node **head, void *data)
         exit(1);
     }
 
-    // Set the node's data pointer to the provided data.
     newNode->data = data;
+    newNode->next = NULL;
+    newNode->prev = NULL;
 
-    // Make next of new node as head.
-    newNode->next = (*head);
+    return newNode;
+}
 
-    // Move the head to point to the new node.
-    (*head) = newNode;
+void append(struct Node **head, void *data)
+{
+    struct Node *newNode = createNode(data);
+
+    // If the list is empty, make the new node as head.
+    if (*head == NULL)
+    {
+        *head = newNode;
+        newNode->next = newNode;
+        newNode->prev = newNode;
+    }
+    else
+    {
+        // Insert the new node at the end.
+        struct Node *last = (*head)->prev;
+        last->next = newNode;
+        newNode->prev = last;
+        newNode->next = *head;
+        (*head)->prev = newNode;
+    }
 }
 
 void freeList(struct Node *head)
 {
-    struct Node *temp;
-
-    while (head != NULL)
+    if (head == NULL)
     {
-        temp = head;
-        head = head->next;
-
-        // Free the data associated with the node.
-        free(temp->data);
-
-        // Free the node itself.
-        free(temp);
+        return;
     }
+
+    struct Node *current = head;
+    struct Node *next;
+
+    do
+    {
+        next = current->next;
+        free(current->data);
+        free(current);
+        current = next;
+    } while (current != head);
 }
 
 int do_fseek(FILE *fp, int offset, int whence)
