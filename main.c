@@ -40,11 +40,11 @@ struct DirEntry
 
 struct Node
 {
-    int data;
+    void *data; // Generic pointer (i.e., generics).
     struct Node *next;
 };
 
-void push(struct Node **head, int newData);
+void push(struct Node **head, void *newData);
 void freeList(struct Node *head);
 int do_fseek(FILE *fp, int offset, int whence);
 int do_fclose(FILE *fp);
@@ -115,6 +115,8 @@ int main(int argc, char *argv[])
     printf("inodesPerBG: %d\n", sb.inodesPerBG);
     printf("inodeSize: %d\n", sb.inodeSize);
     printf("blockSize: %d\n", sb.blockSize);
+
+    // TODO: Generalize the inode access and parsing.
 
     // Determine which block group the corresponding inode is in.
     int inodeBGNum = (ROOT_INODE_NUM - 1) / sb.inodesPerBG;
@@ -217,12 +219,15 @@ int main(int argc, char *argv[])
     // TODO: Read the doubly indirect block.
     // TODO: Read the triply indirect block.
 
+    struct Node *head = NULL;
+
     // Parse (if dir content/s).
 
     // TODO: Parse (if file content/s).
 
     // Free the dynamically allocated memory.
     free(data);
+    freeList(head);
 
     // Close the ext2 file system.
     do_fclose(ext2FS);
@@ -232,8 +237,8 @@ int main(int argc, char *argv[])
 
 // Utility methods.
 // Singly-linked list.
-// Insert a node at the front of the list.
-void push(struct Node **head, int newData)
+// Function to push data of any type into the linked list.
+void push(struct Node **head, void *data)
 {
     // Allocate memory for new node.
     struct Node *newNode = (struct Node *)malloc(sizeof(struct Node));
@@ -243,8 +248,8 @@ void push(struct Node **head, int newData)
         exit(1);
     }
 
-    // Put in the data.
-    newNode->data = newData;
+    // Set the node's data pointer to the provided data.
+    newNode->data = data;
 
     // Make next of new node as head.
     newNode->next = (*head);
@@ -261,6 +266,11 @@ void freeList(struct Node *head)
     {
         temp = head;
         head = head->next;
+
+        // Free the data associated with the node.
+        free(temp->data);
+
+        // Free the node itself.
         free(temp);
     }
 }
