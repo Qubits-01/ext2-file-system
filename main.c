@@ -6,9 +6,6 @@
 #define BGD_SIZE 32
 #define ROOT_INODE_NUM 2
 
-int do_fseek(FILE *fp, int offset, int whence);
-int do_fclose(FILE *fp);
-
 // superblock struct.
 struct SB
 {
@@ -32,6 +29,25 @@ struct Inode
     uint32_t DIBlockPtr;     // Doubly indirect block pointer.
     uint32_t TIBlockPtr;     // Triply indirect block pointer.
 };
+
+struct DirEntry
+{
+    uint32_t inodeNum;
+    uint16_t entrySize;
+    uint8_t nameLen;
+    unsigned char name[255]; // Assumption: max file name length is 255 chars.
+};
+
+struct Node
+{
+    int data;
+    struct Node *next;
+};
+
+void push(struct Node **head, int newData);
+void freeList(struct Node *head);
+int do_fseek(FILE *fp, int offset, int whence);
+int do_fclose(FILE *fp);
 
 int main(int argc, char *argv[])
 {
@@ -195,6 +211,7 @@ int main(int argc, char *argv[])
             printf("%02x ", data[i * sb.blockSize + j]);
         }
     }
+    printf("\n");
 
     // TODO: Read the singly indirect block.
     // TODO: Read the doubly indirect block.
@@ -214,6 +231,40 @@ int main(int argc, char *argv[])
 }
 
 // Utility methods.
+// Singly-linked list.
+// Insert a node at the front of the list.
+void push(struct Node **head, int newData)
+{
+    // Allocate memory for new node.
+    struct Node *newNode = (struct Node *)malloc(sizeof(struct Node));
+    if (newNode == NULL)
+    {
+        perror("malloc failed");
+        exit(1);
+    }
+
+    // Put in the data.
+    newNode->data = newData;
+
+    // Make next of new node as head.
+    newNode->next = (*head);
+
+    // Move the head to point to the new node.
+    (*head) = newNode;
+}
+
+void freeList(struct Node *head)
+{
+    struct Node *temp;
+
+    while (head != NULL)
+    {
+        temp = head;
+        head = head->next;
+        free(temp);
+    }
+}
+
 int do_fseek(FILE *fp, int offset, int whence)
 {
     if (fseek(fp, offset, whence) != 0)
