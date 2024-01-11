@@ -87,6 +87,7 @@ void append(struct Node **head, void *newData);
 struct Node *pop(struct Node **head);
 void freeList(struct Node *head);
 void *do_malloc(size_t size);
+void *do_calloc(size_t nmemb, size_t size);
 int do_fseek(FILE *fp, int offset, int whence);
 int do_fread(void *buffer, size_t size, size_t count, FILE *file);
 int do_fclose(FILE *fp);
@@ -151,31 +152,6 @@ int main(int argc, char *argv[])
 }
 
 // UTILITY METHODS -------------------------------------------------------
-// Check if root ('/') is the first character of the file path.
-int checkRootDir(char *fP)
-{
-    if (fP[0] != '/')
-    {
-        fprintf(stderr, "INVALID PATH\n");
-        exit(-1);
-    }
-
-    return 0;
-}
-
-int printPath(struct Node *fileObjNamesList)
-{
-    struct Node *current = fileObjNamesList;
-    do
-    {
-        printf("%s", (char *)current->data);
-        current = current->next;
-    } while (current != fileObjNamesList);
-    newLine;
-
-    return 0;
-}
-
 int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath)
 {
     // Print the current path.
@@ -250,6 +226,31 @@ int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath)
         // Free the allocated memory.
         freeList(dirEntriesList);
         free(data);
+    }
+
+    return 0;
+}
+
+// Check if root ('/') is the first character of the file path.
+int printPath(struct Node *fileObjNamesList)
+{
+    struct Node *current = fileObjNamesList;
+    do
+    {
+        printf("%s", (char *)current->data);
+        current = current->next;
+    } while (current != fileObjNamesList);
+    newLine;
+
+    return 0;
+}
+
+int checkRootDir(char *fP)
+{
+    if (fP[0] != '/')
+    {
+        fprintf(stderr, "INVALID PATH\n");
+        exit(-1);
     }
 
     return 0;
@@ -343,7 +344,7 @@ struct Inode *parseInode(uint32_t inodeNum, FILE *ext2FS)
 unsigned char *readAllDataBlocks(struct Inode *inode, FILE *ext2FS)
 {
     // Allocate memory for the data.
-    unsigned char *data = (unsigned char *)do_malloc(inode->FSizeLower * sizeof(unsigned char));
+    unsigned char *data = (unsigned char *)do_calloc(inode->FSizeLower, sizeof(unsigned char));
 
     // Read all the data blocks.
     size_t readBytes = 0;
@@ -619,6 +620,18 @@ void *do_malloc(size_t size)
     if (ptr == NULL)
     {
         perror("malloc failed");
+        exit(1);
+    }
+
+    return ptr;
+}
+
+void *do_calloc(size_t nmemb, size_t size)
+{
+    void *ptr = calloc(nmemb, size);
+    if (ptr == NULL)
+    {
+        perror("calloc failed");
         exit(1);
     }
 
