@@ -52,7 +52,7 @@ struct Node
 // Function prototypes.
 int parseSuperblock(FILE *ext2FS);
 struct Inode *parseInode(uint32_t inodeNum, FILE *ext2FS);
-unsigned char *getAllBlockData(struct Inode *inode, FILE *ext2FS);
+unsigned char *readAllDataBlocks(struct Inode *inode, FILE *ext2FS);
 int readDataBlock(unsigned char *data,
                   uint32_t dBlockAddr,
                   size_t *bytesToRead,
@@ -77,6 +77,7 @@ int readTIBlockPtr(unsigned char *data,
                    size_t *bytesToRead,
                    struct Inode *inode,
                    FILE *ext2FS);
+struct Node *parseDirEntryInfo(unsigned char *data, struct Inode *inode);
 struct Node *createNode(void *data);
 void append(struct Node **head, void *newData);
 void freeList(struct Node *head);
@@ -131,50 +132,11 @@ int main(int argc, char *argv[])
     // Read and parse the root inode.
     struct Inode *inode = parseInode(ROOT_INODE_NUM, ext2FS);
 
-    // Read the corresponding data block/s.
-    // Read the direct blocks.
-    // Dynamically allocate memory (using the fileSizeLower).
-    unsigned char *data = getAllBlockData(inode, ext2FS);
+    // Read the corresponding data block/s of the inode.
+    unsigned char *data = readAllDataBlocks(inode, ext2FS);
 
-    // TODO: Generalize the directory entry access and parsing.
-
-    struct Node *dirEntriesList = NULL;
-    struct DirEntry *dirEntry;
-
-    // Parse (if dir content/s).
-    // Traverse every byte of data.
-    uint32_t i = 0;
-    while (i < inode->FSizeLower)
-    {
-        struct DirEntry *dirEntry = (struct DirEntry *)malloc(sizeof(struct DirEntry));
-
-        // Get the inode number (byte 0 to byte 3 - in little endian).
-        dirEntry->inodeNum = data[i] | data[i + 1] << 8 | data[i + 2] << 16 | data[i + 3] << 24;
-        i += 4;
-
-        // Get the entry size (byte 4 to byte 5 - in little endian).
-        dirEntry->entrySize = data[i] | data[i + 1] << 8;
-        i += 2;
-
-        // Get the name length (byte 6).
-        dirEntry->nameLen = data[i];
-        i += 1;
-        i += 1; // Skip the file type byte.
-
-        // Get the name (byte 8 to byte 8 + nameLen - 1).
-        for (int j = 0; j < dirEntry->nameLen; j++)
-        {
-            dirEntry->name[j] = data[i + j];
-        }
-        // Add the null terminator.
-        dirEntry->name[dirEntry->nameLen] = '\0';
-
-        // Append the directory entry into the linked list.
-        append(&dirEntriesList, dirEntry);
-
-        // Update i for the next directory entry.
-        i += dirEntry->entrySize - 8;
-    }
+    // Parse the data (if dir content/s).
+    struct Node *dirEntriesList = parseDirEntryInfo(data, inode);
 
     // Print the directory entries.
     struct Node *temp = dirEntriesList;
@@ -189,8 +151,6 @@ int main(int argc, char *argv[])
 
         temp = temp->next;
     } while (temp != dirEntriesList);
-
-    // TODO: Parse (if file content/s).
 
     // Free the dynamically allocated memory.
     free(inode);              // Free the root inode struct.
@@ -289,7 +249,7 @@ struct Inode *parseInode(uint32_t inodeNum, FILE *ext2FS)
 
 // Get all the block data pointed by the 12 direct block pointers,
 // singly indirect block pointer, and doubly indirect block pointer.
-unsigned char *getAllBlockData(struct Inode *inode, FILE *ext2FS)
+unsigned char *readAllDataBlocks(struct Inode *inode, FILE *ext2FS)
 {
     // Allocate memory for the data.
     unsigned char *data = (unsigned char *)do_malloc(inode->FSizeLower * sizeof(unsigned char));
@@ -441,6 +401,50 @@ int readTIBlockPtr(unsigned char *data,
     }
 
     return 0;
+}
+
+// Parse the data block/s (when it is a directory entry information).
+// Note: A directory is never empty (i.e., it always has at least two entries:
+//       the current directory (.) and the parent directory (..)).
+struct Node *parseDirEntryInfo(unsigned char *data, struct Inode *inode)
+{
+    struct Node *dirEntriesList = NULL;
+
+    // Traverse the every byte of data.
+    uint32_t i = 0;
+    while (i < inode->FSizeLower)
+    {
+        struct DirEntry *dirEntry = (struct DirEntry *)malloc(sizeof(struct DirEntry));
+
+        // Get the inode number (byte 0 to byte 3 - in little endian).
+        dirEntry->inodeNum = data[i] | data[i + 1] << 8 | data[i + 2] << 16 | data[i + 3] << 24;
+        i += 4;
+
+        // Get the entry size (byte 4 to byte 5 - in little endian).
+        dirEntry->entrySize = data[i] | data[i + 1] << 8;
+        i += 2;
+
+        // Get the name length (byte 6).
+        dirEntry->nameLen = data[i];
+        i += 1;
+        i += 1; // Skip the file type byte.
+
+        // Get the name (byte 8 to byte 8 + nameLen - 1).
+        for (int j = 0; j < dirEntry->nameLen; j++)
+        {
+            dirEntry->name[j] = data[i + j];
+        }
+        // Add the null terminator.
+        dirEntry->name[dirEntry->nameLen] = '\0';
+
+        // Append the directory entry into the linked list.
+        append(&dirEntriesList, dirEntry);
+
+        // Update i for the next directory entry.
+        i += dirEntry->entrySize - 8;
+    }
+
+    return dirEntriesList;
 }
 
 // Circular doubly linked list.
