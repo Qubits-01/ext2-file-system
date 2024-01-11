@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SB_ADDR 1024
 #define BGD_SIZE 32
@@ -38,8 +39,8 @@ struct DirEntry
     uint32_t inodeNum;
     uint16_t entrySize;
     uint8_t nameLen;
-    // Assumption: max file name length is 255 chars (inclusive of '/0').
-    unsigned char name[255];
+    // Assumption: max file name length is 256 chars (inclusive of '/0').
+    unsigned char name[256];
 };
 
 struct Node
@@ -50,6 +51,9 @@ struct Node
 };
 
 // Function prototypes.
+int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath);
+int printPath(struct Node *fileObjNamesList);
+int checkRootDir(char *fP);
 int parseSuperblock(FILE *ext2FS);
 struct Inode *parseInode(uint32_t inodeNum, FILE *ext2FS);
 unsigned char *readAllDataBlocks(struct Inode *inode, FILE *ext2FS);
@@ -80,6 +84,7 @@ int readTIBlockPtr(unsigned char *data,
 struct Node *parseDirEntryInfo(unsigned char *data, struct Inode *inode);
 struct Node *createNode(void *data);
 void append(struct Node **head, void *newData);
+struct Node *pop(struct Node **head);
 void freeList(struct Node *head);
 void *do_malloc(size_t size);
 int do_fseek(FILE *fp, int offset, int whence);
@@ -88,25 +93,27 @@ int do_fclose(FILE *fp);
 
 int main(int argc, char *argv[])
 {
-    // GET CMD LINE ARGUMENTS --------------------------------------------------
+    // GET CMD LINE ARGUMENTS -------------------------------------------------
     // Must be able to take in one or more two command line arguments.
-    // Check if at least one argument is provided
+    // Check if at least one argument is provided.
     if (argc < 2)
     {
-        perror("Arg1 is required");
+        fprintf(stderr, "Arg1 is required");
         exit(1);
     }
 
     // Get the ext2 file system file path.
     char *ext2FP = argv[1];
+    checkRootDir(ext2FP);
 
     // Check if a second argument is provided
     if (argc == 3)
     {
         // Get the absolute file path.
         char *abs_file_path = argv[2];
+        checkRootDir(abs_file_path);
     }
-    // -------------------------------------------------------------------------
+    // ------------------------------------------------------------------------
 
     // Open the ext2 file system.
     FILE *ext2FS = fopen(ext2FP, "rb");
@@ -119,51 +126,135 @@ int main(int argc, char *argv[])
     // Read and parse the superblock.
     parseSuperblock(ext2FS);
 
-    // Print the superblock info.
-    printf("totalInodes: %d\n", sb.totalInodes);
-    printf("totalBlocks: %d\n", sb.totalBlocks);
-    printf("blockSizeMult: %d\n", sb.blockSizeMult);
-    printf("blocksPerBG: %d\n", sb.blocksPerBG);
-    printf("inodesPerBG: %d\n", sb.inodesPerBG);
-    printf("inodeSize: %d\n", sb.inodeSize);
-    printf("blockSize: %d\n", sb.blockSize);
-    newLine;
-
     // Read and parse the root inode.
-    struct Inode *inode = parseInode(ROOT_INODE_NUM, ext2FS);
+    struct Inode *rootInode = parseInode(ROOT_INODE_NUM, ext2FS);
 
-    // Read the corresponding data block/s of the inode.
-    unsigned char *data = readAllDataBlocks(inode, ext2FS);
-
-    // Parse the data (if dir content/s).
-    struct Node *dirEntriesList = parseDirEntryInfo(data, inode);
-
-    // Print the directory entries.
-    struct Node *temp = dirEntriesList;
-    do
+    // PATH ENUMERATION. ------------------------------------------------------
+    if (argc == 2)
     {
-        struct DirEntry *dirEntry = (struct DirEntry *)temp->data;
+        // Start path enumeration from the root directory.
+        enumeratePaths(rootInode, ext2FS, "/");
+    }
+    // ------------------------------------------------------------------------
 
-        printf("inodeNum: %d\n", dirEntry->inodeNum);
-        printf("entrySize: %d\n", dirEntry->entrySize);
-        printf("nameLen: %d\n", dirEntry->nameLen);
-        printf("name: %s\n\n", dirEntry->name);
+    // FILE SYSTEM OBJECT EXTRACTION ------------------------------------------
+    if (argc == 3)
+    {
+    }
+    // ------------------------------------------------------------------------
 
-        temp = temp->next;
-    } while (temp != dirEntriesList);
-
-    // Free the dynamically allocated memory.
-    free(inode);              // Free the root inode struct.
-    free(data);               // Free the data gathered from the data blocks.
-    freeList(dirEntriesList); // Free the linked list of directory entries.
-
-    // Close the ext2 file system.
+    // Free the allocated memory.
+    free(rootInode);
     do_fclose(ext2FS);
 
     return 0;
 }
 
-// Utility methods.
+// UTILITY METHODS -------------------------------------------------------
+// Check if root ('/') is the first character of the file path.
+int checkRootDir(char *fP)
+{
+    if (fP[0] != '/')
+    {
+        fprintf(stderr, "INVALID PATH\n");
+        exit(-1);
+    }
+
+    return 0;
+}
+
+int printPath(struct Node *fileObjNamesList)
+{
+    struct Node *current = fileObjNamesList;
+    do
+    {
+        printf("%s", (char *)current->data);
+        current = current->next;
+    } while (current != fileObjNamesList);
+    newLine;
+
+    return 0;
+}
+
+int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath)
+{
+    // Print the current path.
+    printf("%s\n", currentPath);
+
+    // Determine if the inode is a directory or a file.
+    int isDir = inode->type >> 12 == 4 ? 1 : 0;
+
+    // If the inode is a directory, get the directory entries.
+    if (isDir)
+    {
+        // Read all the data blocks.
+        unsigned char *data = readAllDataBlocks(inode, ext2FS);
+
+        // Parse the directory entries.
+        struct Node *dirEntriesList = parseDirEntryInfo(data, inode);
+
+        // Traverse the directory entries.
+        struct Node *current = dirEntriesList;
+        do
+        {
+            // Get the data of the current directory entry.
+            struct DirEntry *currDirEntry = (struct DirEntry *)current->data;
+
+            // Disregard the current directory (.) and parent directory (..).
+            if (strcmp(currDirEntry->name, ".") == 0 ||
+                strcmp(currDirEntry->name, "..") == 0)
+            {
+                current = current->next;
+                continue;
+            }
+
+            // Get the inode number.
+            uint32_t inodeNum = currDirEntry->inodeNum;
+
+            // Edge case. The directory "lost+found" sometimes have an inode number of 0
+            if (inodeNum == 0)
+            {
+                current = current->next;
+                continue;
+            }
+
+            // Get the inode of the current directory entry.
+            struct Inode *currInode = parseInode(inodeNum, ext2FS);
+
+            // Get the file object name.
+            // Note: nameLen does not include the null terminator.
+            // Due to this, +2 is for the null terminator and the slash (/).
+            char *fileObjName = (char *)do_malloc(sizeof(char) * (currDirEntry->nameLen + 2));
+            strcpy(fileObjName, currDirEntry->name);
+
+            // Add the slash (/) at the end of the file object name if it is a directory.
+            if (currInode->type >> 12 == 4)
+                strcat(fileObjName, "/\0");
+
+            // Append the file object name into the current path.
+            char *newPath = (char *)do_malloc(sizeof(char) * (strlen(currentPath) + strlen(fileObjName) + 1));
+            strcpy(newPath, currentPath);
+            strcat(newPath, fileObjName);
+
+            // Recursively enumerate the paths.
+            enumeratePaths(currInode, ext2FS, newPath);
+
+            // Free the allocated memory.
+            free(currInode);
+            free(fileObjName);
+            free(newPath);
+
+            current = current->next;
+        } while (current != dirEntriesList);
+
+        // Free the allocated memory.
+        freeList(dirEntriesList);
+        free(data);
+    }
+
+    return 0;
+}
+
 int parseSuperblock(FILE *ext2FS)
 {
     do_fseek(ext2FS, SB_ADDR, SEEK_SET);
@@ -259,6 +350,7 @@ unsigned char *readAllDataBlocks(struct Inode *inode, FILE *ext2FS)
     read12DBlockPtrs(data, &readBytes, inode, ext2FS);
     readSIBlockPtr(data, inode->SIBlockPtr * sb.blockSize, &readBytes, inode, ext2FS);
     readDIBlockPtr(data, inode->DIBlockPtr * sb.blockSize, &readBytes, inode, ext2FS);
+    readTIBlockPtr(data, inode->TIBlockPtr * sb.blockSize, &readBytes, inode, ext2FS);
 
     return data;
 }
@@ -480,6 +572,28 @@ void append(struct Node **head, void *data)
     }
 }
 
+struct Node *pop(struct Node **head)
+{
+    if (*head == NULL)
+    {
+        printf("List is empty, cannot pop.\n");
+        return NULL;
+    }
+
+    struct Node *lastNode = (*head)->prev;
+    if (*head == lastNode)
+    {
+        *head = NULL;
+    }
+    else
+    {
+        lastNode->prev->next = *head;
+        (*head)->prev = lastNode->prev;
+    }
+
+    return lastNode;
+}
+
 void freeList(struct Node *head)
 {
     if (head == NULL)
@@ -526,7 +640,7 @@ int do_fread(void *buffer, size_t size, size_t count, FILE *file)
 {
     if (fread(buffer, size, count, file) != count)
     {
-        perror("fread failed");
+        fprintf(stderr, "fread failed\n");
         exit(1);
     }
 
