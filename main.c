@@ -5,7 +5,7 @@
 #define SB_ADDR 1024
 #define BGD_SIZE 32
 #define ROOT_INODE_NUM 2
-#define newLine printf("\n");
+#define newLine printf("\n")
 
 // superblock struct.
 struct SB
@@ -65,20 +65,18 @@ int main(int argc, char *argv[])
     // Check if at least one argument is provided
     if (argc < 2)
     {
-        perror("Must provide at least one argument");
+        perror("Arg1 is required");
         exit(1);
     }
 
     // Get the ext2 file system file path.
     char *ext2FP = argv[1];
-    printf("arg1: %s\n", ext2FP);
 
     // Check if a second argument is provided
     if (argc == 3)
     {
         // Get the absolute file path.
         char *abs_file_path = argv[2];
-        printf("arg2: %s\n", abs_file_path);
     }
     // -------------------------------------------------------------------------
 
@@ -101,8 +99,7 @@ int main(int argc, char *argv[])
     printf("inodesPerBG: %d\n", sb.inodesPerBG);
     printf("inodeSize: %d\n", sb.inodeSize);
     printf("blockSize: %d\n", sb.blockSize);
-
-    // TODO: Generalize the inode access and parsing.
+    newLine;
 
     // Read and parse the root inode.
     struct Inode *inode = parseInode(ROOT_INODE_NUM, ext2FS);
@@ -120,11 +117,9 @@ int main(int argc, char *argv[])
 
         // Get the direct block pointer.
         uint32_t DBlockPtr = inode->DBlockPtrs[i];
-        printf("directBlockPtr: %d\n", DBlockPtr);
 
         // Get the direct block address.
         uint32_t DBlockAddr = DBlockPtr * sb.blockSize;
-        printf("directBlockAddr: %d\n", DBlockAddr);
 
         // Read the entire direct block.
         do_fseek(ext2FS, DBlockAddr, SEEK_SET);
@@ -284,6 +279,35 @@ struct Inode *parseInode(uint32_t inodeNum, FILE *ext2FS)
     // -------------------------------------------------------------------------
 
     return inode;
+}
+
+// Get all the block data pointed by the 12 direct block pointers,
+// singly indirect block pointer, and doubly indirect block pointer.
+unsigned char *getAllBlockData(struct Inode *inode, FILE *ext2FS)
+{
+    // Allocate memory for the data.
+    unsigned char *data = (unsigned char *)do_malloc(inode->FSizeLower * sizeof(unsigned char));
+
+    // Read the direct blocks.
+    for (int i = 0; i < 12; i++)
+    {
+        if (inode->DBlockPtrs[i] == 0)
+        {
+            break;
+        }
+
+        // Get the direct block pointer.
+        uint32_t DBlockPtr = inode->DBlockPtrs[i];
+
+        // Get the direct block address.
+        uint32_t DBlockAddr = DBlockPtr * sb.blockSize;
+
+        // Read the entire direct block.
+        do_fseek(ext2FS, DBlockAddr, SEEK_SET);
+        do_fread(&data[i * sb.blockSize], sb.blockSize, 1, ext2FS);
+    }
+
+    return data;
 }
 
 // Circular doubly linked list.
