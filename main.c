@@ -4,6 +4,8 @@
 
 #define SB_ADDR 1024
 #define BGD_SIZE 32
+#define DBLOCK_PTR_SIZE 4
+#define DBLOCK_PTR_COUNT 12
 #define ROOT_INODE_NUM 2
 #define newLine printf("\n")
 
@@ -50,6 +52,31 @@ struct Node
 // Function prototypes.
 int parseSuperblock(FILE *ext2FS);
 struct Inode *parseInode(uint32_t inodeNum, FILE *ext2FS);
+unsigned char *getAllBlockData(struct Inode *inode, FILE *ext2FS);
+int readDataBlock(unsigned char *data,
+                  uint32_t dBlockAddr,
+                  size_t *bytesToRead,
+                  struct Inode *inode,
+                  FILE *ext2FS);
+int read12DBlockPtrs(unsigned char *data,
+                     size_t *bytesToRead,
+                     struct Inode *inode,
+                     FILE *ext2FS);
+int readSIBlockPtr(unsigned char *data,
+                   uint32_t sIBlockAddr,
+                   size_t *bytesToRead,
+                   struct Inode *inode,
+                   FILE *ext2FS);
+int readDIBlockPtr(unsigned char *data,
+                   uint32_t dIBlockAddr,
+                   size_t *bytesToRead,
+                   struct Inode *inode,
+                   FILE *ext2FS);
+int readTIBlockPtr(unsigned char *data,
+                   uint32_t tIBlockAddr,
+                   size_t *bytesToRead,
+                   struct Inode *inode,
+                   FILE *ext2FS);
 struct Node *createNode(void *data);
 void append(struct Node **head, void *newData);
 void freeList(struct Node *head);
@@ -107,28 +134,7 @@ int main(int argc, char *argv[])
     // Read the corresponding data block/s.
     // Read the direct blocks.
     // Dynamically allocate memory (using the fileSizeLower).
-    unsigned char *data = (unsigned char *)malloc(inode->FSizeLower * sizeof(unsigned char));
-    for (int i = 0; i < 12; i++)
-    {
-        if (inode->DBlockPtrs[i] == 0)
-        {
-            break;
-        }
-
-        // Get the direct block pointer.
-        uint32_t DBlockPtr = inode->DBlockPtrs[i];
-
-        // Get the direct block address.
-        uint32_t DBlockAddr = DBlockPtr * sb.blockSize;
-
-        // Read the entire direct block.
-        do_fseek(ext2FS, DBlockAddr, SEEK_SET);
-        do_fread(&data[i * sb.blockSize], sb.blockSize, 1, ext2FS);
-    }
-
-    // TODO: Read the singly indirect block.
-    // TODO: Read the doubly indirect block.
-    // TODO: Read the triply indirect block.
+    unsigned char *data = getAllBlockData(inode, ext2FS);
 
     // TODO: Generalize the directory entry access and parsing.
 
@@ -246,7 +252,7 @@ struct Inode *parseInode(uint32_t inodeNum, FILE *ext2FS)
     uint32_t inodeAddr = inodeTableAddr + (inodeIndex * sb.inodeSize);
     // -------------------------------------------------------------------------
 
-    // PARSE THE INODE AND BUILD THE ITS INODE STRUCT --------------------------
+    // PARSE THE INODE AND BUILD ITS INODE STRUCT ------------------------------
     // Allocate memory for the inode struct.
     struct Inode *inode = (struct Inode *)do_malloc(sizeof(struct Inode));
 
@@ -288,26 +294,153 @@ unsigned char *getAllBlockData(struct Inode *inode, FILE *ext2FS)
     // Allocate memory for the data.
     unsigned char *data = (unsigned char *)do_malloc(inode->FSizeLower * sizeof(unsigned char));
 
-    // Read the direct blocks.
-    for (int i = 0; i < 12; i++)
+    // Read all the data blocks.
+    size_t readBytes = 0;
+    read12DBlockPtrs(data, &readBytes, inode, ext2FS);
+    readSIBlockPtr(data, inode->SIBlockPtr * sb.blockSize, &readBytes, inode, ext2FS);
+    readDIBlockPtr(data, inode->DIBlockPtr * sb.blockSize, &readBytes, inode, ext2FS);
+
+    return data;
+}
+
+int readDataBlock(unsigned char *data,
+                  uint32_t dBlockAddr,
+                  size_t *readBytes,
+                  struct Inode *inode,
+                  FILE *ext2FS)
+{
+    // Read byte by byte (per data block).
+    do_fseek(ext2FS, dBlockAddr, SEEK_SET);
+    for (int i = 0; i < sb.blockSize; i++)
     {
-        if (inode->DBlockPtrs[i] == 0)
+        if (*readBytes == inode->FSizeLower)
+        {
+            break;
+        }
+
+        do_fread(&data[*readBytes], 1, 1, ext2FS);
+        *readBytes += 1;
+    }
+
+    return 0;
+}
+
+int read12DBlockPtrs(unsigned char *data,
+                     size_t *readBytes,
+                     struct Inode *inode,
+                     FILE *ext2FS)
+{
+    for (int i = 0; i < DBLOCK_PTR_COUNT; i++)
+    {
+        if (*readBytes == inode->FSizeLower)
         {
             break;
         }
 
         // Get the direct block pointer.
-        uint32_t DBlockPtr = inode->DBlockPtrs[i];
+        uint32_t dBlockPtr = inode->DBlockPtrs[i];
 
         // Get the direct block address.
-        uint32_t DBlockAddr = DBlockPtr * sb.blockSize;
+        uint32_t dBlockAddr = dBlockPtr * sb.blockSize;
 
-        // Read the entire direct block.
-        do_fseek(ext2FS, DBlockAddr, SEEK_SET);
-        do_fread(&data[i * sb.blockSize], sb.blockSize, 1, ext2FS);
+        // Read the corresponding direct data block.
+        readDataBlock(data, dBlockAddr, readBytes, inode, ext2FS);
     }
 
-    return data;
+    return 0;
+}
+
+int readSIBlockPtr(unsigned char *data,
+                   uint32_t sIBlockAddr,
+                   size_t *readBytes,
+                   struct Inode *inode,
+                   FILE *ext2FS)
+{
+    // Read byte by byte (per data block).
+    do_fseek(ext2FS, sIBlockAddr, SEEK_SET);
+    int numOfDBlockPtrs = sb.blockSize / DBLOCK_PTR_SIZE;
+
+    for (int i = 0; i < numOfDBlockPtrs; i++)
+    {
+        if (*readBytes == inode->FSizeLower)
+        {
+            break;
+        }
+
+        // Get the direct block pointer (four bytes - in little endian).
+        uint32_t dBlockPtr;
+        do_fread(&dBlockPtr, sizeof(dBlockPtr), 1, ext2FS);
+
+        // Get the direct block address.
+        uint32_t dBlockAddr = dBlockPtr * sb.blockSize;
+
+        // Read the corresponding direct data block.
+        readDataBlock(data, dBlockAddr, readBytes, inode, ext2FS);
+    }
+
+    return 0;
+}
+
+int readDIBlockPtr(unsigned char *data,
+                   uint32_t dIBlockAddr,
+                   size_t *readBytes,
+                   struct Inode *inode,
+                   FILE *ext2FS)
+{
+    // Read byte by byte (per data block).
+    do_fseek(ext2FS, dIBlockAddr, SEEK_SET);
+    int numOfSIBlockPtrs = sb.blockSize / DBLOCK_PTR_SIZE;
+
+    for (int i = 0; i < numOfSIBlockPtrs; i++)
+    {
+        if (*readBytes == inode->FSizeLower)
+        {
+            break;
+        }
+
+        // Get the singly indirect block pointer (four bytes - in little endian).
+        uint32_t sIBlockPtr;
+        do_fread(&sIBlockPtr, sizeof(sIBlockPtr), 1, ext2FS);
+
+        // Get the singly indirect block address.
+        uint32_t sIBlockAddr = sIBlockPtr * sb.blockSize;
+
+        // Read the corresponding singly indirect data block.
+        readSIBlockPtr(data, sIBlockAddr, readBytes, inode, ext2FS);
+    }
+
+    return 0;
+}
+
+int readTIBlockPtr(unsigned char *data,
+                   uint32_t tIBlockAddr,
+                   size_t *readBytes,
+                   struct Inode *inode,
+                   FILE *ext2FS)
+{
+    // Read byte by byte (per data block).
+    do_fseek(ext2FS, tIBlockAddr, SEEK_SET);
+    int numOfDIBlockPtrs = sb.blockSize / DBLOCK_PTR_SIZE;
+
+    for (int i = 0; i < numOfDIBlockPtrs; i++)
+    {
+        if (*readBytes == inode->FSizeLower)
+        {
+            break;
+        }
+
+        // Get the doubly indirect block pointer (four bytes - in little endian).
+        uint32_t dIBlockPtr;
+        do_fread(&dIBlockPtr, sizeof(dIBlockPtr), 1, ext2FS);
+
+        // Get the doubly indirect block address.
+        uint32_t dIBlockAddr = dIBlockPtr * sb.blockSize;
+
+        // Read the corresponding doubly indirect data block.
+        readDIBlockPtr(data, dIBlockAddr, readBytes, inode, ext2FS);
+    }
+
+    return 0;
 }
 
 // Circular doubly linked list.
