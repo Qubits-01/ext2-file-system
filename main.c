@@ -51,9 +51,10 @@ struct Node
 };
 
 // Function prototypes.
-struct Inode *getFileObjInode(FILE *ext2FS, char *filePath);
-int isInodeDir(struct Inode *inode);
+struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName);
+int extractFileObj(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS);
 int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath);
+int isInodeDir(struct Inode *inode);
 int parseSuperblock(FILE *ext2FS);
 struct Inode *parseInode(uint32_t inodeNum, FILE *ext2FS);
 unsigned char *readAllDataBlocks(struct Inode *inode, FILE *ext2FS);
@@ -131,11 +132,16 @@ int main(int argc, char *argv[])
     {
         // The getFileObjInode function implicitly begins from the
         // root directory and it also verifies the file path's validity.
-        struct Inode *fileObjInode = getFileObjInode(ext2FS, argv[2]);
+        unsigned char fileObjName[256] = "/";
+        struct Inode *fileObjInode = getFileObjInode(ext2FS, argv[2], fileObjName);
 
         // Print the file object inode data.
+        printf("name: %s\n", fileObjName);
         printf("isDir: %d\n", fileObjInode->type >> 12 == 4 ? 1 : 0);
         printf("file size: %d\n", fileObjInode->FSizeLower);
+
+        // Extract the file object.
+        extractFileObj(fileObjInode, fileObjName, ext2FS);
 
         // Free the allocated memory.
         free(fileObjInode);
@@ -150,19 +156,9 @@ int main(int argc, char *argv[])
 }
 
 // UTILITY METHODS ------------------------------------------------------------
-// Check if root ('/') is the first character of the file path.
-int checkRootDir(char *fP)
-{
-    if (fP[0] != '/')
-    {
-        fprintf(stderr, "INVALID PATH\n");
-        exit(-1);
-    }
-
-    return 0;
-}
-
-struct Inode *getFileObjInode(FILE *ext2FS, char *filePath)
+// This function also verifies the file path's validity by using
+// the proper Directory Entry Tables.
+struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName)
 {
     // Initialize the root inode.
     struct Inode *rootInode = parseInode(ROOT_INODE_NUM, ext2FS);
@@ -196,7 +192,7 @@ struct Inode *getFileObjInode(FILE *ext2FS, char *filePath)
     struct Node *seenNodesList = NULL;
     append(&seenNodesList, rootInode);
 
-    // Traverse the tokens list.
+    // TRAVERSE THE TOKENS LIST ----------------------------------
     struct Node *currToken = tokensList;
     do
     {
@@ -252,6 +248,9 @@ struct Inode *getFileObjInode(FILE *ext2FS, char *filePath)
                 // Update the isFileObjFound flag.
                 isFileObjFound = 1;
 
+                // Update the file object name.
+                strcpy(fileObjName, dirEntry->name);
+
                 // Get the inode number.
                 uint32_t inodeNum = dirEntry->inodeNum;
 
@@ -305,6 +304,7 @@ struct Inode *getFileObjInode(FILE *ext2FS, char *filePath)
         // Move to the next token.
         currToken = currToken->next;
     } while (currToken != tokensList);
+    // -----------------------------------------------------------
 
     // Create a copy of the last inode in the seen nodes list.
     struct Inode *fileObjInode = (struct Inode *)do_malloc(sizeof(struct Inode));
@@ -329,9 +329,41 @@ struct Inode *getFileObjInode(FILE *ext2FS, char *filePath)
     return fileObjInode;
 }
 
-int isInodeDir(struct Inode *inode)
+int extractFileObj(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS)
 {
-    return inode->type >> 12 == 4 ? 1 : 0;
+    // Determine if the file object is a directory or a file.
+    int isDir = isInodeDir(fileObjInode);
+
+    // If file.
+    if (!isDir)
+    {
+        // Get the data.
+        unsigned char *data = readAllDataBlocks(fileObjInode, ext2FS);
+
+        // Open the the file in binary write mode.
+        FILE *fileObj = fopen(name, "wb");
+        if (fileObj == NULL)
+        {
+            perror("fopen failed");
+            exit(1);
+        }
+
+        // Write the data into the file.
+        size_t bytesWritten = fwrite(data, sizeof(unsigned char), fileObjInode->FSizeLower, fileObj);
+        if (bytesWritten != fileObjInode->FSizeLower)
+        {
+            fprintf(stderr, "fwrite failed\n");
+            exit(1);
+        }
+
+        // Close the file.
+        do_fclose(fileObj);
+
+        // Free the allocated memory.
+        free(data);
+    }
+
+    return 0;
 }
 
 int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath)
@@ -413,6 +445,11 @@ int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath)
     }
 
     return 0;
+}
+
+int isInodeDir(struct Inode *inode)
+{
+    return inode->type >> 12 == 4 ? 1 : 0;
 }
 
 int parseSuperblock(FILE *ext2FS)
