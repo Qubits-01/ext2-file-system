@@ -51,9 +51,9 @@ struct Node
 };
 
 // Function prototypes.
+struct Inode *getFileObjInode(FILE *ext2FS, char *filePath);
+int isInodeDir(struct Inode *inode);
 int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath);
-int printPath(struct Node *fileObjNamesList);
-int checkRootDir(char *fP);
 int parseSuperblock(FILE *ext2FS);
 struct Inode *parseInode(uint32_t inodeNum, FILE *ext2FS);
 unsigned char *readAllDataBlocks(struct Inode *inode, FILE *ext2FS);
@@ -102,22 +102,10 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Arg1 is required");
         exit(1);
     }
-
-    // Get the ext2 file system file path.
-    char *ext2FP = argv[1];
-    checkRootDir(ext2FP);
-
-    // Check if a second argument is provided
-    if (argc == 3)
-    {
-        // Get the absolute file path.
-        char *abs_file_path = argv[2];
-        checkRootDir(abs_file_path);
-    }
     // ------------------------------------------------------------------------
 
     // Open the ext2 file system.
-    FILE *ext2FS = fopen(ext2FP, "rb");
+    FILE *ext2FS = fopen(argv[1], "rb");
     if (ext2FS == NULL)
     {
         perror("fopen failed");
@@ -141,6 +129,16 @@ int main(int argc, char *argv[])
     // FILE SYSTEM OBJECT EXTRACTION ------------------------------------------
     if (argc == 3)
     {
+        // The getFileObjInode function implicitly begins from the
+        // root directory and it also verifies the file path's validity.
+        struct Inode *fileObjInode = getFileObjInode(ext2FS, argv[2]);
+
+        // Print the file object inode data.
+        printf("isDir: %d\n", fileObjInode->type >> 12 == 4 ? 1 : 0);
+        printf("file size: %d\n", fileObjInode->FSizeLower);
+
+        // Free the allocated memory.
+        free(fileObjInode);
     }
     // ------------------------------------------------------------------------
 
@@ -151,14 +149,198 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-// UTILITY METHODS -------------------------------------------------------
+// UTILITY METHODS ------------------------------------------------------------
+// Check if root ('/') is the first character of the file path.
+int checkRootDir(char *fP)
+{
+    if (fP[0] != '/')
+    {
+        fprintf(stderr, "INVALID PATH\n");
+        exit(-1);
+    }
+
+    return 0;
+}
+
+struct Inode *getFileObjInode(FILE *ext2FS, char *filePath)
+{
+    // Initialize the root inode.
+    struct Inode *rootInode = parseInode(ROOT_INODE_NUM, ext2FS);
+
+    // Create a copy of the file path.
+    char *filePathCopy = (char *)do_malloc(sizeof(char) * (strlen(filePath) + 1));
+    strcpy(filePathCopy, filePath);
+
+    // Tokenize the file path.
+    // Note: strtok modifies the original string.
+    struct Node *tokensList = NULL;
+    char *token = strtok(filePathCopy, "/");
+
+    while (token != NULL)
+    {
+        char *tokenCopy = (char *)do_malloc(sizeof(char) * (strlen(token) + 1));
+        strcpy(tokenCopy, token);
+        append(&tokensList, tokenCopy);
+
+        token = strtok(NULL, "/");
+    }
+
+    // If the tokens list is still empty at this point,
+    // then it means that it is a root directory.
+    if (tokensList == NULL)
+    {
+        return rootInode;
+    }
+
+    // Build and initialize the seen nodes list.
+    struct Node *seenNodesList = NULL;
+    append(&seenNodesList, rootInode);
+
+    // Traverse the tokens list.
+    struct Node *currToken = tokensList;
+    do
+    {
+        // Get the current token name.
+        char *tokenName = (char *)currToken->data;
+
+        // If tokenName is a dot (.), do nothing.
+        if (strcmp(tokenName, ".") == 0)
+        {
+            currToken = currToken->next;
+            continue;
+        }
+
+        // If tokenName is a double dot (..), pop and free the last inode
+        // from the seen nodes list (given that it is not the root inode).
+        if (strcmp(tokenName, "..") == 0)
+        {
+            if (seenNodesList->prev != seenNodesList)
+            {
+                struct Node *lastNode = pop(&seenNodesList);
+                free(lastNode->data); // Free the inode data.
+                free(lastNode);       // Free the node itself.
+            }
+
+            currToken = currToken->next;
+            continue;
+        }
+
+        // Get the current directory inode
+        // (i.e, the last inode in the seen nodes list).
+        struct Inode *currInode = (struct Inode *)seenNodesList->prev->data;
+
+        // Read all the data blocks.
+        unsigned char *data = readAllDataBlocks(currInode, ext2FS);
+
+        // Parse the directory entries.
+        struct Node *dirEntriesList = parseDirEntryInfo(data, currInode);
+
+        // Initialize the isFileObjFound flag.
+        int isFileObjFound = 0;
+
+        // TRAVERSE THE DIRECTORY ENTRIES -------------------------------------
+        struct Node *currDirEntry = dirEntriesList;
+        do
+        {
+            // Get the data of the current directory entry.
+            struct DirEntry *dirEntry = (struct DirEntry *)currDirEntry->data;
+
+            // If the current directory entry name is equal to the current token name,
+            // then get the inode number and parse the inode.
+            if (strcmp(dirEntry->name, tokenName) == 0)
+            {
+                // Update the isFileObjFound flag.
+                isFileObjFound = 1;
+
+                // Get the inode number.
+                uint32_t inodeNum = dirEntry->inodeNum;
+
+                // Get the inode of the current directory entry.
+                struct Inode *currInode = parseInode(inodeNum, ext2FS);
+
+                // Determine if the inode is a directory or a file.
+                int isDir = isInodeDir(currInode);
+
+                // If the inode is a directory, add it to the seen nodes list.
+                if (isDir)
+                {
+                    append(&seenNodesList, currInode);
+                    break;
+                }
+
+                // If the inode is a file and it is not the last token,
+                // print an error message and exit the program.
+                if (!isDir && currToken->next != tokensList)
+                {
+                    fprintf(stderr, "INVALID PATH\n");
+                    exit(-1);
+                }
+
+                // If the inode is a file and it is the last token,
+                // add it to the seen nodes list.
+                if (!isDir && currToken->next == tokensList)
+                {
+                    append(&seenNodesList, currInode);
+                }
+
+                break;
+            }
+
+            currDirEntry = currDirEntry->next;
+        } while (currDirEntry != dirEntriesList);
+        // --------------------------------------------------------------------
+
+        // Free the allocated memory.
+        freeList(dirEntriesList);
+        free(data);
+
+        // If the file object is not found, then this
+        // means that the file path is invalid.
+        if (!isFileObjFound)
+        {
+            fprintf(stderr, "INVALID PATH\n");
+            exit(-1);
+        }
+
+        // Move to the next token.
+        currToken = currToken->next;
+    } while (currToken != tokensList);
+
+    // Create a copy of the last inode in the seen nodes list.
+    struct Inode *fileObjInode = (struct Inode *)do_malloc(sizeof(struct Inode));
+    memcpy(fileObjInode, seenNodesList->prev->data, sizeof(struct Inode));
+
+    // Determine if the last token follows the proper file path format.
+    // That is, if the last token is a directory, then it must end with a slash (/).
+    // If the last token is a file, then it must not end with a slash (/).
+    if ((isInodeDir(fileObjInode) && filePath[strlen(filePath) - 1] != '/') ||
+        (!isInodeDir(fileObjInode) && filePath[strlen(filePath) - 1] == '/'))
+    {
+        fprintf(stderr, "INVALID PATH\n");
+        exit(-1);
+    }
+
+    // Free the allocated memory.
+    freeList(tokensList);
+    freeList(seenNodesList);
+    free(filePathCopy);
+
+    // Return the file object inode.
+    return fileObjInode;
+}
+
+int isInodeDir(struct Inode *inode)
+{
+    return inode->type >> 12 == 4 ? 1 : 0;
+}
+
 int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath)
 {
     // Print the current path.
     printf("%s\n", currentPath);
 
     // Determine if the inode is a directory or a file.
-    int isDir = inode->type >> 12 == 4 ? 1 : 0;
+    int isDir = isInodeDir(inode);
 
     // If the inode is a directory, get the directory entries.
     if (isDir)
@@ -199,13 +381,15 @@ int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath)
 
             // Get the file object name.
             // Note: nameLen does not include the null terminator.
-            // Due to this, +2 is for the null terminator and the slash (/).
+            // Due to this, +2 is for the null terminator and the potential slash (/).
             char *fileObjName = (char *)do_malloc(sizeof(char) * (currDirEntry->nameLen + 2));
             strcpy(fileObjName, currDirEntry->name);
 
             // Add the slash (/) at the end of the file object name if it is a directory.
             if (currInode->type >> 12 == 4)
+            {
                 strcat(fileObjName, "/\0");
+            }
 
             // Append the file object name into the current path.
             char *newPath = (char *)do_malloc(sizeof(char) * (strlen(currentPath) + strlen(fileObjName) + 1));
@@ -226,31 +410,6 @@ int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath)
         // Free the allocated memory.
         freeList(dirEntriesList);
         free(data);
-    }
-
-    return 0;
-}
-
-// Check if root ('/') is the first character of the file path.
-int printPath(struct Node *fileObjNamesList)
-{
-    struct Node *current = fileObjNamesList;
-    do
-    {
-        printf("%s", (char *)current->data);
-        current = current->next;
-    } while (current != fileObjNamesList);
-    newLine;
-
-    return 0;
-}
-
-int checkRootDir(char *fP)
-{
-    if (fP[0] != '/')
-    {
-        fprintf(stderr, "INVALID PATH\n");
-        exit(-1);
     }
 
     return 0;
