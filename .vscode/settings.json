@@ -2,5 +2,11 @@
     "cSpell.words": [
         "BGDT",
         "DBLOCK"
-    ]
+    ],
+    "files.associations": {
+        "*.page-template": "vue",
+        "*.layout-template": "vue",
+        "*.vue": "vue",
+        "fcntl.h": "c"
+    }
 }
