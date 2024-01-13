@@ -17,4 +17,4 @@ test11 - file uses 12 + 1024 DP < x < 12 + 1024 + 1024^2 DP     (doubly indirect
 test11 - file uses 12 + 1024 + 1024^2 DP                        (doubly indirect block must not contain zero values)
 test12 - file uses 12 + 1024 + 1024^2 DP < x < 12 + 1024 + 1024^2 + 1024^3 DP      (triply indirect pointer must not be a zero)
 test13 - file uses 12 + 1024 + 1024^2 + 1024^3 DP               (MAX FILE SIZE: triply indirect block must not contain zero values)
-test15 - All 
+test15 - Pictures, videos, pdf files, txt files. Note: Only upto singly IPtrs.
