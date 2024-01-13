@@ -55,6 +55,7 @@ struct Node
 struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName);
 int extractFileObj(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS);
 int extractFile(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS);
+int extractDir(struct Inode *fileObjInode, FILE *ext2FS, char *currentPath);
 int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath);
 int isInodeDir(struct Inode *inode);
 int parseSuperblock(FILE *ext2FS);
@@ -143,21 +144,6 @@ int main(int argc, char *argv[])
         // root directory and it also verifies the file path's validity.
         unsigned char fileObjName[256] = "/";
         struct Inode *fileObjInode = getFileObjInode(ext2FS, argv[2], fileObjName);
-
-        // Print the file object inode data.
-        printf("name: %s\n", fileObjName);
-        printf("isDir: %d\n", fileObjInode->type >> 12 == 4 ? 1 : 0);
-        printf("file size: %d\n", fileObjInode->FSizeLower);
-        printf("direct block pointers: ");
-        for (int i = 0; i < 12; i++)
-        {
-            printf("%d ", fileObjInode->DBlockPtrs[i]);
-        }
-        newLine;
-        printf("singly indirect block pointer: %d\n", fileObjInode->SIBlockPtr);
-        printf("doubly indirect block pointer: %d\n", fileObjInode->DIBlockPtr);
-        printf("triply indirect block pointer: %d\n", fileObjInode->TIBlockPtr);
-        newLine;
 
         // Extract the file object.
         extractFileObj(fileObjInode, fileObjName, ext2FS);
@@ -358,6 +344,7 @@ int extractFileObj(struct Inode *fileObjInode, unsigned char name[256], FILE *ex
     {
         // Create "output" directory.
         do_mkdir("output");
+        extractDir(fileObjInode, ext2FS, "./output/");
     }
     // File
     else
@@ -371,6 +358,20 @@ int extractFileObj(struct Inode *fileObjInode, unsigned char name[256], FILE *ex
 
 int extractFile(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS)
 {
+    // Print the file object inode data.
+    printf("name: %s\n", name);
+    printf("isDir: %d\n", fileObjInode->type >> 12 == 4 ? 1 : 0);
+    printf("file size: %d\n", fileObjInode->FSizeLower);
+    printf("direct block pointers: ");
+    for (int i = 0; i < 12; i++)
+    {
+        printf("%d ", fileObjInode->DBlockPtrs[i]);
+    }
+    newLine;
+    printf("singly indirect block pointer: %d\n", fileObjInode->SIBlockPtr);
+    printf("doubly indirect block pointer: %d\n", fileObjInode->DIBlockPtr);
+    printf("triply indirect block pointer: %d\n", fileObjInode->TIBlockPtr);
+    newLine;
 
     // Get the data.
     unsigned char *data = readAllDataBlocks(fileObjInode, ext2FS);
@@ -385,6 +386,102 @@ int extractFile(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2F
     do_fclose(fileObj);
 
     // Free the allocated memory.
+    free(data);
+
+    return 0;
+}
+
+// Extract the contents of the given dir inode and save a copy of it.
+int extractDir(struct Inode *fileObjInode, FILE *ext2FS, char *currentPath)
+{
+    // Determine if the file object is a directory or a file.
+    int isDir = isInodeDir(fileObjInode);
+
+    // Base case: If the file object is a file, extract it.
+    if (!isDir)
+    {
+        extractFile(fileObjInode, currentPath, ext2FS);
+        return 0;
+    }
+
+    // Create a copy of the current path.
+    char *currentPathCopy = (char *)do_malloc(sizeof(char) * (strlen(currentPath) + 1));
+    strcpy(currentPathCopy, currentPath);
+
+    // Get the data.
+    unsigned char *data = readAllDataBlocks(fileObjInode, ext2FS);
+
+    // Parse the directory entries.
+    struct Node *dirEntriesList = parseDirEntryInfo(data, fileObjInode);
+
+    // Traverse the directory entries.
+    struct Node *currDirEntry = dirEntriesList;
+    do
+    {
+        // Get the data of the current directory entry.
+        struct DirEntry *dirEntry = (struct DirEntry *)currDirEntry->data;
+
+        // Disregard the current directory (.) and parent directory (..).
+        if (strcmp(dirEntry->name, ".") == 0 ||
+            strcmp(dirEntry->name, "..") == 0)
+        {
+            currDirEntry = currDirEntry->next;
+            continue;
+        }
+
+        // Get the inode number.
+        uint32_t inodeNum = dirEntry->inodeNum;
+
+        // Edge case. The directory "lost+found" sometimes have an inode number of 0
+        if (inodeNum == 0)
+        {
+            currDirEntry = currDirEntry->next;
+            continue;
+        }
+
+        // Get the inode of the current directory entry.
+        struct Inode *currInode = parseInode(inodeNum, ext2FS);
+
+        // Get the file object name.
+        // Note: nameLen does not include the null terminator.
+        // Due to this, +2 is for the null terminator and the potential slash (/).
+        char *fileObjName = (char *)do_malloc(sizeof(char) * (dirEntry->nameLen + 2));
+        strcpy(fileObjName, dirEntry->name);
+
+        // Determine if the inode is a directory or a file.
+        int isDir = isInodeDir(currInode);
+
+        // Add the slash (/) at the end of the file object name if it is a directory.
+        if (isDir)
+        {
+            strcat(fileObjName, "/\0");
+        }
+
+        // Append the file object name into the current path.
+        char *newPath = (char *)do_malloc(sizeof(char) * (strlen(currentPath) + strlen(fileObjName) + 1));
+        strcpy(newPath, currentPath);
+        strcat(newPath, fileObjName);
+
+        // If the file object is a directory, create a directory
+        // using the new path.
+        if (isDir)
+        {
+            do_mkdir(newPath);
+        }
+
+        // Recursively extract the file object.
+        extractDir(currInode, ext2FS, newPath);
+
+        // Free the allocated memory.
+        free(currInode);
+        free(fileObjName);
+        free(newPath);
+
+        currDirEntry = currDirEntry->next;
+    } while (currDirEntry != dirEntriesList);
+
+    // Free the allocated memory.
+    freeList(dirEntriesList);
     free(data);
 
     return 0;
@@ -442,7 +539,7 @@ int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath)
             strcpy(fileObjName, currDirEntry->name);
 
             // Add the slash (/) at the end of the file object name if it is a directory.
-            if (currInode->type >> 12 == 4)
+            if (isInodeDir(currInode))
             {
                 strcat(fileObjName, "/\0");
             }
