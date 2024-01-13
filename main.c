@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h> // for mkdir.
 
 #define SB_ADDR 1024
 #define BGD_SIZE 32
@@ -53,6 +54,7 @@ struct Node
 // Function prototypes.
 struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName);
 int extractFileObj(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS);
+int extractFile(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS);
 int enumeratePaths(struct Inode *inode, FILE *ext2FS, char *currentPath);
 int isInodeDir(struct Inode *inode);
 int parseSuperblock(FILE *ext2FS);
@@ -89,9 +91,12 @@ struct Node *pop(struct Node **head);
 void freeList(struct Node *head);
 void *do_malloc(size_t size);
 void *do_calloc(size_t nmemb, size_t size);
+FILE *do_fopen(char *name, char *mode);
 int do_fseek(FILE *fp, uint64_t offset, int whence);
 int do_fread(void *buffer, size_t size, size_t count, FILE *file);
+int do_fwrite(void *buffer, size_t size, size_t count, FILE *file);
 int do_fclose(FILE *fp);
+int do_mkdir(char *name);
 
 int main(int argc, char *argv[])
 {
@@ -106,12 +111,7 @@ int main(int argc, char *argv[])
     // ------------------------------------------------------------------------
 
     // Open the ext2 file system.
-    FILE *ext2FS = fopen(argv[1], "rb");
-    if (ext2FS == NULL)
-    {
-        perror("fopen failed");
-        exit(1);
-    }
+    FILE *ext2FS = do_fopen(argv[1], "rb");
 
     // Read and parse the superblock.
     parseSuperblock(ext2FS);
@@ -312,7 +312,7 @@ struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileO
         freeList(dirEntriesList);
         free(data);
 
-        // If the file object is not found, then this
+        // If the file object was not found, then this
         // means that the file path is invalid.
         if (!isFileObjFound)
         {
@@ -353,34 +353,39 @@ int extractFileObj(struct Inode *fileObjInode, unsigned char name[256], FILE *ex
     // Determine if the file object is a directory or a file.
     int isDir = isInodeDir(fileObjInode);
 
-    // If file.
-    if (!isDir)
+    // Dir
+    if (isDir)
     {
-        // Get the data.
-        unsigned char *data = readAllDataBlocks(fileObjInode, ext2FS);
-
-        // Open the the file in binary write mode.
-        FILE *fileObj = fopen(name, "wb");
-        if (fileObj == NULL)
-        {
-            perror("fopen failed");
-            exit(1);
-        }
-
-        // Write the data into the file.
-        size_t bytesWritten = fwrite(data, sizeof(unsigned char), fileObjInode->FSizeLower, fileObj);
-        if (bytesWritten != fileObjInode->FSizeLower)
-        {
-            fprintf(stderr, "fwrite failed\n");
-            exit(1);
-        }
-
-        // Close the file.
-        do_fclose(fileObj);
-
-        // Free the allocated memory.
-        free(data);
+        // Create "output" directory.
+        do_mkdir("output");
     }
+    // File
+    else
+    {
+        // The file will be extracted in the current directory of this program.
+        extractFile(fileObjInode, name, ext2FS);
+    }
+
+    return 0;
+}
+
+int extractFile(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS)
+{
+
+    // Get the data.
+    unsigned char *data = readAllDataBlocks(fileObjInode, ext2FS);
+
+    // Open the the file in binary write mode.
+    FILE *fileObj = do_fopen(name, "wb");
+
+    // Write the data into the file.
+    do_fwrite(data, sizeof(unsigned char), fileObjInode->FSizeLower, fileObj);
+
+    // Close the file.
+    do_fclose(fileObj);
+
+    // Free the allocated memory.
+    free(data);
 
     return 0;
 }
@@ -856,6 +861,18 @@ void *do_calloc(size_t nmemb, size_t size)
     return ptr;
 }
 
+FILE *do_fopen(char *name, char *mode)
+{
+    FILE *fp = fopen(name, mode);
+    if (fp == NULL)
+    {
+        perror("fopen failed");
+        exit(1);
+    }
+
+    return fp;
+}
+
 int do_fseek(FILE *fp, uint64_t offset, int whence)
 {
     if (fseek(fp, offset, whence) != 0)
@@ -878,11 +895,35 @@ int do_fread(void *buffer, size_t size, size_t count, FILE *file)
     return 0;
 }
 
+int do_fwrite(void *buffer, size_t size, size_t count, FILE *file)
+{
+    if (fwrite(buffer, size, count, file) != count)
+    {
+        fprintf(stderr, "fwrite failed\n");
+        exit(1);
+    }
+
+    return 0;
+}
+
 int do_fclose(FILE *fp)
 {
     if (fclose(fp) != 0)
     {
         perror("fclose failed");
+        exit(1);
+    }
+
+    return 0;
+}
+
+int do_mkdir(char *name)
+{
+    // Create a new directory with read, write, and execute permissions
+    // for owner, group, and others.
+    if (mkdir(name, 0777) != 0)
+    {
+        perror("mkdir failed");
         exit(1);
     }
 
