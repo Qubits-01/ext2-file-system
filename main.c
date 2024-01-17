@@ -850,8 +850,15 @@ struct Node *parseDirEntryInfo(unsigned char *data, struct Inode *inode)
         // Add the null terminator.
         dirEntry->name[dirEntry->nameLen] = '\0';
 
-        // Append the directory entry into the linked list.
-        append(&dirEntriesList, dirEntry);
+        // Append the directory entry into the linked list if inode number is not 0.
+        if (dirEntry->inodeNum != 0)
+        {
+            append(&dirEntriesList, dirEntry);
+        }
+        else
+        {
+            free(dirEntry);
+        }
 
         // Update i for the next directory entry.
         i += dirEntry->entrySize - 8;
