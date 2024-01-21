@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h> // for mkdir.
+#include <errno.h>
 
 #define SB_ADDR 1024
 #define BGD_SIZE 32
@@ -117,7 +118,7 @@ int main(int argc, char *argv[])
     // Read and parse the superblock.
     parseSuperblock(ext2FS);
     // Print the superblock data.
-    printf("totalInodes: %d\n", sb.totalInodes);
+    /*printf("totalInodes: %d\n", sb.totalInodes);
     printf("totalBlocks: %d\n", sb.totalBlocks);
     printf("blockSizeMult: %d\n", sb.blockSizeMult);
     printf("blocksPerBG: %d\n", sb.blocksPerBG);
@@ -125,7 +126,7 @@ int main(int argc, char *argv[])
     printf("inodeSize: %d\n", sb.inodeSize);
     printf("blockSize: %d\n", sb.blockSize);
     newLine;
-
+    */
     // Read and parse the root inode.
     struct Inode *rootInode = parseInode(ROOT_INODE_NUM, ext2FS);
 
@@ -359,7 +360,7 @@ int extractFileObj(struct Inode *fileObjInode, unsigned char name[256], FILE *ex
 int extractFile(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS)
 {
     // Print the file object inode data.
-    printf("name: %s\n", name);
+    /*printf("name: %s\n", name);
     printf("isDir: %d\n", fileObjInode->type >> 12 == 4 ? 1 : 0);
     printf("file size: %d\n", fileObjInode->FSizeLower);
     printf("direct block pointers: ");
@@ -372,7 +373,7 @@ int extractFile(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2F
     printf("doubly indirect block pointer: %d\n", fileObjInode->DIBlockPtr);
     printf("triply indirect block pointer: %d\n", fileObjInode->TIBlockPtr);
     newLine;
-
+    */
     // Get the data.
     unsigned char *data = readAllDataBlocks(fileObjInode, ext2FS);
 
@@ -1022,8 +1023,10 @@ int do_mkdir(char *name)
     // for owner, group, and others.
     if (mkdir(name, 0777) != 0)
     {
-        perror("mkdir failed");
-        exit(1);
+        if (errno != EEXIST) {
+            perror("mkdir failed");
+            exit(1);
+        }
     }
 
     return 0;
