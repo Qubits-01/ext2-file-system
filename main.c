@@ -53,7 +53,7 @@ struct Node
 };
 
 // Function prototypes.
-struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName);
+struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName, int *returnVal);
 int extractFileObj(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS);
 int extractFile(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS);
 int extractDir(struct Inode *fileObjInode, FILE *ext2FS, char *currentPath);
@@ -117,16 +117,7 @@ int main(int argc, char *argv[])
 
     // Read and parse the superblock.
     parseSuperblock(ext2FS);
-    // Print the superblock data.
-    /*printf("totalInodes: %d\n", sb.totalInodes);
-    printf("totalBlocks: %d\n", sb.totalBlocks);
-    printf("blockSizeMult: %d\n", sb.blockSizeMult);
-    printf("blocksPerBG: %d\n", sb.blocksPerBG);
-    printf("inodesPerBG: %d\n", sb.inodesPerBG);
-    printf("inodeSize: %d\n", sb.inodeSize);
-    printf("blockSize: %d\n", sb.blockSize);
-    newLine;
-    */
+
     // Read and parse the root inode.
     struct Inode *rootInode = parseInode(ROOT_INODE_NUM, ext2FS);
 
@@ -144,7 +135,14 @@ int main(int argc, char *argv[])
         // The getFileObjInode function implicitly begins from the
         // root directory and it also verifies the file path's validity.
         unsigned char fileObjName[256] = "/";
-        struct Inode *fileObjInode = getFileObjInode(ext2FS, argv[2], fileObjName);
+
+        // 0 means no error.
+        int returnVal = 0;
+        struct Inode *fileObjInode = getFileObjInode(ext2FS, argv[2], fileObjName, &returnVal);
+        if (returnVal == -1)
+        {
+            return -1;
+        }
 
         // Extract the file object.
         extractFileObj(fileObjInode, fileObjName, ext2FS);
@@ -164,7 +162,7 @@ int main(int argc, char *argv[])
 // UTILITY METHODS ------------------------------------------------------------
 // This function also verifies the file path's validity by using
 // the proper Directory Entry Tables.
-struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName)
+struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName, int *returnVal)
 {
     // Initialize the root inode.
     struct Inode *rootInode = parseInode(ROOT_INODE_NUM, ext2FS);
@@ -278,7 +276,9 @@ struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileO
                 if (!isDir && currToken->next != tokensList)
                 {
                     fprintf(stderr, "INVALID PATH\n");
-                    exit(-1);
+                    // exit(-1);
+                    *returnVal = -1;
+                    return NULL;
                 }
 
                 // If the inode is a file and it is the last token,
@@ -305,6 +305,8 @@ struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileO
         {
             fprintf(stderr, "INVALID PATH\n");
             exit(-1);
+            *returnVal = -1;
+            return NULL;
         }
 
         // Move to the next token.
@@ -323,7 +325,9 @@ struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileO
         (!isInodeDir(fileObjInode) && filePath[strlen(filePath) - 1] == '/'))
     {
         fprintf(stderr, "INVALID PATH\n");
-        exit(-1);
+        // exit(-1);
+        *returnVal = -1;
+        return NULL;
     }
 
     // Free the allocated memory.
@@ -359,21 +363,6 @@ int extractFileObj(struct Inode *fileObjInode, unsigned char name[256], FILE *ex
 
 int extractFile(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS)
 {
-    // Print the file object inode data.
-    /*printf("name: %s\n", name);
-    printf("isDir: %d\n", fileObjInode->type >> 12 == 4 ? 1 : 0);
-    printf("file size: %d\n", fileObjInode->FSizeLower);
-    printf("direct block pointers: ");
-    for (int i = 0; i < 12; i++)
-    {
-        printf("%d ", fileObjInode->DBlockPtrs[i]);
-    }
-    newLine;
-    printf("singly indirect block pointer: %d\n", fileObjInode->SIBlockPtr);
-    printf("doubly indirect block pointer: %d\n", fileObjInode->DIBlockPtr);
-    printf("triply indirect block pointer: %d\n", fileObjInode->TIBlockPtr);
-    newLine;
-    */
     // Get the data.
     unsigned char *data = readAllDataBlocks(fileObjInode, ext2FS);
 
@@ -1023,7 +1012,8 @@ int do_mkdir(char *name)
     // for owner, group, and others.
     if (mkdir(name, 0777) != 0)
     {
-        if (errno != EEXIST) {
+        if (errno != EEXIST)
+        {
             perror("mkdir failed");
             exit(1);
         }
