@@ -53,7 +53,7 @@ struct Node
 };
 
 // Function prototypes.
-struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName, int *returnVal);
+struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName);
 int extractFileObj(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS);
 int extractFile(struct Inode *fileObjInode, unsigned char name[256], FILE *ext2FS);
 int extractDir(struct Inode *fileObjInode, FILE *ext2FS, char *currentPath);
@@ -136,13 +136,7 @@ int main(int argc, char *argv[])
         // root directory and it also verifies the file path's validity.
         unsigned char fileObjName[256] = "/";
 
-        // 0 means no error.
-        int returnVal = 0;
-        struct Inode *fileObjInode = getFileObjInode(ext2FS, argv[2], fileObjName, &returnVal);
-        if (returnVal == -1)
-        {
-            return -1;
-        }
+        struct Inode *fileObjInode = getFileObjInode(ext2FS, argv[2], fileObjName);
 
         // Extract the file object.
         extractFileObj(fileObjInode, fileObjName, ext2FS);
@@ -162,7 +156,7 @@ int main(int argc, char *argv[])
 // UTILITY METHODS ------------------------------------------------------------
 // This function also verifies the file path's validity by using
 // the proper Directory Entry Tables.
-struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName, int *returnVal)
+struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileObjName)
 {
     // Initialize the root inode.
     struct Inode *rootInode = parseInode(ROOT_INODE_NUM, ext2FS);
@@ -276,9 +270,7 @@ struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileO
                 if (!isDir && currToken->next != tokensList)
                 {
                     fprintf(stderr, "INVALID PATH\n");
-                    // exit(-1);
-                    *returnVal = -1;
-                    return NULL;
+                    exit(-1);
                 }
 
                 // If the inode is a file and it is the last token,
@@ -305,8 +297,6 @@ struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileO
         {
             fprintf(stderr, "INVALID PATH\n");
             exit(-1);
-            *returnVal = -1;
-            return NULL;
         }
 
         // Move to the next token.
@@ -325,9 +315,7 @@ struct Inode *getFileObjInode(FILE *ext2FS, char *filePath, unsigned char *fileO
         (!isInodeDir(fileObjInode) && filePath[strlen(filePath) - 1] == '/'))
     {
         fprintf(stderr, "INVALID PATH\n");
-        // exit(-1);
-        *returnVal = -1;
-        return NULL;
+        exit(-1);
     }
 
     // Free the allocated memory.
